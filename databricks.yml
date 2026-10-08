@@ -1,0 +1,55 @@
+# Databricks Asset Bundle (Declarative Automation Bundle) for the food-delivery lakehouse.
+# Everything in the workspace - schema, landing volume, Lakeflow pipeline, job, dashboard -
+# is declared here and in resources/*.yml. Deploy with:
+#   databricks bundle deploy -t dev     (or -t prod)
+# Authentication comes from the environment (DATABRICKS_HOST / DATABRICKS_TOKEN) or a
+# ~/.databrickscfg profile (--profile); no host is hard-coded so the repo works for any workspace.
+bundle:
+  name: fooddelivery
+  databricks_cli_version: ">= 1.19.0"
+
+include:
+  - resources/*.yml
+
+artifacts:
+  fooddelivery_wheel:
+    type: whl
+    build: uv build --wheel
+    path: .
+
+variables:
+  catalog:
+    description: Unity Catalog catalog. Free Edition ships with `workspace`.
+    default: workspace
+  schema:
+    description: Schema for every table. In dev mode the CLI prefixes it with dev_<user>_.
+    default: fooddelivery
+  warehouse_id:
+    description: SQL warehouse used by the dashboard (Free Edition has exactly one, 2X-Small).
+    lookup:
+      warehouse: Serverless Starter Warehouse
+
+targets:
+  dev:
+    # Resources get a "[dev <user>]" prefix (schemas: dev_<user>_), the pipeline runs in
+    # development mode and schedules are paused.
+    mode: development
+    default: true
+
+  prod:
+    mode: production
+    workspace:
+      # A single deployed copy, owned by the deploying user (Free Edition has no service principals UI).
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    permissions:
+      - user_name: ${workspace.current_user.userName}
+        level: CAN_MANAGE
+    resources:
+      schemas:
+        fooddelivery:
+          # read access for everyone in the workspace on the production schema only
+          catalog_name: ${var.catalog}
+          name: ${var.schema}
+          grants:
+            - principal: account users
+              privileges: [USE_SCHEMA, SELECT]

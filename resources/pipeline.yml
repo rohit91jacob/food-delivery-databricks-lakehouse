@@ -1,0 +1,27 @@
+# Lakeflow Declarative Pipeline: bronze (Auto Loader) -> silver (AUTO CDC, SCD1/SCD2) -> gold (MVs).
+resources:
+  pipelines:
+    fooddelivery_lakehouse:
+      name: fooddelivery_lakehouse
+      catalog: ${var.catalog}
+      schema: ${resources.schemas.fooddelivery.name}
+      serverless: true   # the only compute type on Free Edition
+      channel: CURRENT
+      continuous: false  # triggered by the daily job (and so by Airflow)
+      root_path: ../src/fooddelivery_pipeline
+      libraries:
+        - glob:
+            include: ../src/fooddelivery_pipeline/transformations/**
+      environment:
+        dependencies:
+          # installs this repo's `fooddelivery` package (schemas, rules, transformations) into the pipeline
+          - --editable ${workspace.file_path}
+      configuration:
+        fooddelivery.landing_path: /Volumes/${var.catalog}/${resources.schemas.fooddelivery.name}/${resources.volumes.landing.name}
+      notifications:
+        - email_recipients:
+            - ${workspace.current_user.userName}
+          alerts:
+            - on-update-failure
+            - on-update-fatal-failure
+            - on-flow-failure

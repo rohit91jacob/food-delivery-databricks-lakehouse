@@ -1,0 +1,10 @@
+# AI/BI (Lakeview) dashboard over the gold marts, using the workspace's single SQL warehouse.
+resources:
+  dashboards:
+    fooddelivery_ops:
+      display_name: Food Delivery Operations
+      file_path: ../dashboards/food_delivery_ops.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      # dataset queries use unqualified table names; these set their default catalog/schema
+      dataset_catalog: ${var.catalog}
+      dataset_schema: ${resources.schemas.fooddelivery.name}

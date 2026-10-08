@@ -1,0 +1,639 @@
+{
+  "datasets": [
+    {
+      "name": "kpis",
+      "displayName": "Daily KPIs",
+      "queryLines": [
+        "SELECT business_date, city, orders_placed, orders_delivered, orders_cancelled, gmv, aov,\n",
+        "       on_time_rate, cancellation_rate, contribution_margin, avg_delivery_minutes, refunds_amount\n",
+        "FROM gold_daily_kpis\n"
+      ]
+    },
+    {
+      "name": "sla",
+      "displayName": "Delivery SLA by hour",
+      "queryLines": [
+        "SELECT placed_hour, weather, city, delivered_orders, late_orders, p90_delivery_minutes, eta_mae_minutes\n",
+        "FROM gold_delivery_sla_hourly\n"
+      ]
+    },
+    {
+      "name": "cancellations",
+      "displayName": "Cancellations",
+      "queryLines": [
+        "SELECT business_date, city, cancellation_reason, cancelled_orders, gmv_lost FROM gold_cancellations_daily\n"
+      ]
+    },
+    {
+      "name": "riders",
+      "displayName": "Rider utilisation",
+      "queryLines": [
+        "SELECT business_date, city, rider_id, deliveries, utilisation, earnings FROM gold_rider_daily\n",
+        "WHERE shift_minutes > 0\n"
+      ]
+    },
+    {
+      "name": "dishes",
+      "displayName": "Top dishes",
+      "queryLines": [
+        "SELECT week_start, city, item_name, quantity, revenue FROM gold_menu_popularity_weekly\n",
+        "WHERE rank_in_city_week <= 5\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "overview",
+      "displayName": "Overview",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "textbox_spec": "# Food Delivery Operations\nGold marts from the `fooddelivery` Lakeflow pipeline. Business dates are in Asia/Kolkata."
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "c_gmv",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpis",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "sum(gmv)",
+                      "expression": "SUM(`gmv`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(gmv)",
+                  "displayName": "GMV (INR)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "GMV (INR)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_orders",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpis",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "sum(orders_delivered)",
+                      "expression": "SUM(`orders_delivered`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(orders_delivered)",
+                  "displayName": "Delivered orders"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Delivered orders"
+              }
+            }
+          },
+          "position": {
+            "x": 1,
+            "y": 2,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_aov",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpis",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "aov",
+                      "expression": "SUM(`gmv`) / SUM(`orders_delivered`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "aov",
+                  "displayName": "Average order value"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Average order value"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 2,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_ontime",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpis",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "avg(on_time_rate)",
+                      "expression": "AVG(`on_time_rate`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(on_time_rate)",
+                  "displayName": "On-time rate"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "On-time rate"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_cancel",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpis",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "avg(cancellation_rate)",
+                      "expression": "AVG(`cancellation_rate`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(cancellation_rate)",
+                  "displayName": "Cancellation rate"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Cancellation rate"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c_margin",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpis",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "sum(contribution_margin)",
+                      "expression": "SUM(`contribution_margin`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(contribution_margin)",
+                  "displayName": "Contribution margin (INR)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Contribution margin (INR)"
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 2,
+            "width": 1,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "l_gmv",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpis",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "business_date",
+                      "expression": "`business_date`"
+                    },
+                    {
+                      "name": "sum(gmv)",
+                      "expression": "SUM(`gmv`)"
+                    },
+                    {
+                      "name": "city",
+                      "expression": "`city`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "business_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "business_date"
+                },
+                "y": {
+                  "fieldName": "sum(gmv)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "GMV by day and city"
+                },
+                "color": {
+                  "fieldName": "city",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "city"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "GMV by day and city"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "b_late",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "sla",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "placed_hour",
+                      "expression": "`placed_hour`"
+                    },
+                    {
+                      "name": "late_share",
+                      "expression": "SUM(`late_orders`) / SUM(`delivered_orders`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "placed_hour",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "placed_hour"
+                },
+                "y": {
+                  "fieldName": "late_share",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Late-delivery share by hour of day"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Late-delivery share by hour of day"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 5,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "b_weather",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "sla",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "weather",
+                      "expression": "`weather`"
+                    },
+                    {
+                      "name": "avg(p90_delivery_minutes)",
+                      "expression": "AVG(`p90_delivery_minutes`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "weather",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "weather"
+                },
+                "y": {
+                  "fieldName": "avg(p90_delivery_minutes)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "p90 delivery minutes by weather"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "p90 delivery minutes by weather"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 2,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "b_cancel",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cancellations",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "cancellation_reason",
+                      "expression": "`cancellation_reason`"
+                    },
+                    {
+                      "name": "sum(cancelled_orders)",
+                      "expression": "SUM(`cancelled_orders`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "cancellation_reason",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "cancellation_reason"
+                },
+                "y": {
+                  "fieldName": "sum(cancelled_orders)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Cancellations by reason"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Cancellations by reason"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 11,
+            "width": 2,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "b_util",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "riders",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "city",
+                      "expression": "`city`"
+                    },
+                    {
+                      "name": "avg(utilisation)",
+                      "expression": "AVG(`utilisation`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "city",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "city"
+                },
+                "y": {
+                  "fieldName": "avg(utilisation)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Average rider utilisation"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Average rider utilisation"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 11,
+            "width": 2,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "b_dishes",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "dishes",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "item_name",
+                      "expression": "`item_name`"
+                    },
+                    {
+                      "name": "sum(quantity)",
+                      "expression": "SUM(`quantity`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "item_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "item_name"
+                },
+                "y": {
+                  "fieldName": "sum(quantity)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Top dishes (weekly top-5 per city)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Top dishes (weekly top-5 per city)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 17,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ]
+    }
+  ]
+}

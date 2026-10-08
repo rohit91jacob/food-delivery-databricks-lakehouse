@@ -1,0 +1,52 @@
+# Daily Lakeflow Job: refresh the pipeline, then run the data-quality gate.
+# Airflow triggers it with run_date = the business date it just landed (DatabricksRunNowOperator).
+# Its own schedule ships PAUSED so it never double-runs alongside Airflow; unpause it to run without Airflow.
+resources:
+  jobs:
+    fooddelivery_daily:
+      name: fooddelivery_daily
+      description: Refresh the food-delivery lakehouse and gate it on data-quality checks.
+      max_concurrent_runs: 1   # Free Edition: one active pipeline per type, max 5 concurrent tasks
+      queue:
+        enabled: true
+      timeout_seconds: 5400
+      performance_target: STANDARD   # serverless cost-optimised mode
+      schedule:
+        quartz_cron_expression: "0 30 1 * * ?"
+        timezone_id: Asia/Kolkata
+        pause_status: PAUSED
+      parameters:
+        - name: run_date
+          default: "{{job.start_time.iso_date}}"
+      tags:
+        project: fooddelivery
+      email_notifications:
+        on_failure:
+          - ${workspace.current_user.userName}
+      tasks:
+        - task_key: refresh_pipeline
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.fooddelivery_lakehouse.id}
+            full_refresh: false
+        - task_key: data_quality
+          depends_on:
+            - task_key: refresh_pipeline
+          environment_key: default
+          python_wheel_task:
+            package_name: fooddelivery
+            entry_point: fd-dq
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --schema
+              - ${resources.schemas.fooddelivery.name}
+              - --run-date
+              - "{{job.parameters.run_date}}"
+              - --job-run-id
+              - "{{job.run_id}}"
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "5"
+            dependencies:
+              - ../dist/*.whl

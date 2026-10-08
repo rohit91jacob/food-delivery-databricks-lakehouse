@@ -1,0 +1,16 @@
+# Unity Catalog storage: one schema for all layers plus the managed landing volume.
+# Free Edition does not support custom storage locations, so both are managed.
+resources:
+  schemas:
+    fooddelivery:
+      catalog_name: ${var.catalog}
+      name: ${var.schema}
+      comment: Food-delivery lakehouse (bronze_*, silver_*, quarantine_*, fct_*, gold_*), managed by the fooddelivery bundle.
+
+  volumes:
+    landing:
+      catalog_name: ${var.catalog}
+      schema_name: ${resources.schemas.fooddelivery.name}
+      name: landing
+      volume_type: MANAGED
+      comment: Raw landing zone. Airflow syncs generated files here through the Files API; Auto Loader reads it.
