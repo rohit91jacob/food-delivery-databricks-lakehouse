@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from conftest import DAYS
+from fdtest import DAYS
 from fooddelivery.config import LakehouseTarget
 from fooddelivery.landing.uploader import VolumeSync
 

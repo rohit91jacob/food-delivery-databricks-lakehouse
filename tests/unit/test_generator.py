@@ -4,7 +4,7 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from decimal import Decimal
 
-from conftest import DAYS, SMALL
+from fdtest import DAYS, SMALL
 from fooddelivery.generator.simulator import ENTITIES, Simulator
 from fooddelivery.generator.writer import read_checksums, read_manifest, write_batch
 

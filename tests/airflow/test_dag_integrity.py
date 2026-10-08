@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import REPO
+from fdtest import REPO
 
 pytestmark = pytest.mark.airflow
-airflow = pytest.importorskip("airflow", reason="Airflow not installed (uv sync --group airflow)")
+# the repo has an airflow/ folder (a namespace package), so probe a real Airflow module
+airflow = pytest.importorskip("airflow.models", reason="Airflow not installed (uv sync --group airflow)")
 
 
 @pytest.fixture(scope="module")

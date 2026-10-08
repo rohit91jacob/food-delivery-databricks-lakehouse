@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import DAYS, SMALL
+from fdtest import DAYS, SMALL
 from fooddelivery.generator.writer import read_manifest
 from fooddelivery.local.lakehouse import PipelineEmulator
 from fooddelivery.quality.reconcile import build_reconciliation_sql

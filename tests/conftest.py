@@ -1,29 +1,17 @@
 from __future__ import annotations
 
-import importlib.util
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import pytest
 
-from fooddelivery.config import GeneratorConfig
+from fdtest import DAYS, HAS_SPARK, SMALL
 from fooddelivery.generator.seed import synthetic_seed
 from fooddelivery.generator.simulator import Simulator
 from fooddelivery.generator.writer import write_batch
 
-REPO = Path(__file__).resolve().parents[1]
-HAS_SPARK = importlib.util.find_spec("pyspark") is not None and importlib.util.find_spec("delta") is not None
-
-# A small but complete world: every feed, CDC change, duplicate and corrupt record shows up within 3 days.
-SMALL = GeneratorConfig(
-    cities=("Bangalore", "Pune"),
-    restaurants_per_city=25,
-    base_orders_per_city=90,
-    initial_customers_per_city=400,
-    duplicate_rate=0.03,
-    invalid_rate=0.03,
-)
-DAYS = [SMALL.start_date + timedelta(days=i) for i in range(3)]
+# Without the `spark` dependency group the Spark test modules can't even be imported.
+collect_ignore_glob = [] if HAS_SPARK else ["spark/*"]
 
 
 def pytest_collection_modifyitems(config, items):

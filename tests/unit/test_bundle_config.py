@@ -10,7 +10,7 @@ import subprocess
 import pytest
 import yaml
 
-from conftest import REPO
+from fdtest import REPO
 
 RESOURCES = sorted((REPO / "resources").glob("*.yml"))
 
