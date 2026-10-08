@@ -4,7 +4,7 @@ ARG AIRFLOW_VERSION=3.3.2
 FROM apache/airflow:${AIRFLOW_VERSION}-python3.12
 
 ARG AIRFLOW_VERSION
-ARG DATABRICKS_PROVIDER_VERSION=7.21.0
+ARG DATABRICKS_PROVIDER_VERSION=7.20.0
 ENV CONSTRAINTS_URL=https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-3.12.txt
 
 # Provider pinned against the official constraints for this Airflow/Python pair.

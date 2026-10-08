@@ -55,7 +55,7 @@ jobs:
       TARGET: ${{ needs.preflight.outputs.target }}
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.2.0
       - name: Install Databricks CLI (pinned, checksum-verified)
         run: |
           set -euo pipefail

@@ -67,7 +67,7 @@ flowchart LR
 | Databricks CLI / bundles | 1.19.0 (checksum-verified in CI) |
 | Lakeflow Declarative Pipelines | `from pyspark import pipelines as dp`, serverless, `channel: CURRENT` |
 | Serverless jobs environment | `environment_version: "5"` |
-| Apache Airflow | 3.3.2 + `apache-airflow-providers-databricks` 7.21.0 |
+| Apache Airflow | 3.3.2 + `apache-airflow-providers-databricks` 7.20.0 (the version pinned by the official 3.3.2 constraints) |
 | databricks-sdk | 0.148.0 |
 | kaggle | 2.2.4 (`KGAT_` access tokens) |
 | Local Spark / Delta (tests, emulator) | pyspark 4.0.1 / delta-spark 4.0.1 (Java 17+) |

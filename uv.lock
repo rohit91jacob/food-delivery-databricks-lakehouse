@@ -271,7 +271,7 @@ wheels = [
 
 [[package]]
 name = "apache-airflow-providers-databricks"
-version = "7.21.0"
+version = "7.20.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -284,9 +284,9 @@ dependencies = [
     { name = "pyarrow" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8c/3c/1e6a6d0f9950cbb3519872f59aa798d2a730e96204c7a1bcab7308c5df8b/apache_airflow_providers_databricks-7.21.0.tar.gz", hash = "sha256:4c850449cf651464abb1ce15d21e89e9271166c6d1930ee97efa0544723fa72c", size = 1110841, upload-time = "2026-09-29T06:55:29.434Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8f/50/97d018d5dfb4b6169983125228164efac2dd217ef11d64d056e7225df636/apache_airflow_providers_databricks-7.20.0.tar.gz", hash = "sha256:b780e4edb96ac9981c89ffcc0a2dbb03fe574014ec9fbb924919014b092ea382", size = 1109239, upload-time = "2026-09-14T14:48:08.09Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/49/e8/6d870a3a246ee9766901396bd4f73107ebf10eaaa6a9952f61dd6e63cfe2/apache_airflow_providers_databricks-7.21.0-py3-none-any.whl", hash = "sha256:0292681b19ba461231f1678ada342283b0490da11e6088dbb394a02b543b6e3e", size = 121351, upload-time = "2026-09-29T06:40:00.371Z" },
+    { url = "https://files.pythonhosted.org/packages/84/f5/1359c6767710e9e3d9c3a82bd928a99f29a9cd52e980648a337ed0b19243/apache_airflow_providers_databricks-7.20.0-py3-none-any.whl", hash = "sha256:2d819247e082d134144d6c7325825a79e53ef4971e31842579345edf56436870", size = 120862, upload-time = "2026-09-14T14:47:27.521Z" },
 ]
 
 [[package]]
@@ -815,7 +815,7 @@ provides-extras = ["seed", "databricks"]
 [package.metadata.requires-dev]
 airflow = [
     { name = "apache-airflow", specifier = "==3.3.2" },
-    { name = "apache-airflow-providers-databricks", specifier = "==7.21.0" },
+    { name = "apache-airflow-providers-databricks", specifier = "==7.20.0" },
     { name = "databricks-sdk", specifier = "==0.148.0" },
     { name = "kaggle", specifier = "==2.2.4" },
 ]
