@@ -1,0 +1,71 @@
+name: Deploy bundle
+
+# dev on pull requests (same-repo branches only; forks never see secrets), prod on main.
+# Every Databricks step is skipped cleanly until DATABRICKS_HOST and DATABRICKS_TOKEN repo secrets exist.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Bundle target
+        type: choice
+        options: [dev, prod]
+        default: dev
+
+permissions:
+  contents: read
+
+env:
+  DATABRICKS_CLI_VERSION: "1.19.0"
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+      target: ${{ steps.check.outputs.target }}
+    steps:
+      - id: check
+        env:
+          HOST: ${{ secrets.DATABRICKS_HOST }}
+          TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: |
+          if [ -n "$HOST" ] && [ -n "$TOKEN" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"; else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::DATABRICKS_HOST/DATABRICKS_TOKEN secrets not set - skipping bundle validate/deploy"
+          fi
+          if [ "${{ github.event_name }}" = "push" ]; then t=prod
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then t="${{ inputs.target }}"
+          else t=dev; fi
+          echo "target=$t" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: preflight
+    if: needs.preflight.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.preflight.outputs.target }}
+    concurrency:
+      group: deploy-${{ needs.preflight.outputs.target }}
+      cancel-in-progress: false
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      TARGET: ${{ needs.preflight.outputs.target }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - name: Install Databricks CLI (pinned, checksum-verified)
+        run: |
+          set -euo pipefail
+          base="https://github.com/databricks/cli/releases/download/v${DATABRICKS_CLI_VERSION}"
+          file="databricks_cli_${DATABRICKS_CLI_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$file" "$base/$file"
+          curl -fsSL -o "$RUNNER_TEMP/SHA256SUMS" "$base/databricks_cli_${DATABRICKS_CLI_VERSION}_SHA256SUMS"
+          (cd "$RUNNER_TEMP" && grep " $file\$" SHA256SUMS | sha256sum -c -)
+          mkdir -p "$RUNNER_TEMP/dbcli" && tar -xzf "$RUNNER_TEMP/$file" -C "$RUNNER_TEMP/dbcli"
+          echo "$RUNNER_TEMP/dbcli" >> "$GITHUB_PATH"
+      - run: databricks bundle validate -t "$TARGET"
+      - run: databricks bundle deploy -t "$TARGET" --auto-approve
+      - run: databricks bundle summary -t "$TARGET"

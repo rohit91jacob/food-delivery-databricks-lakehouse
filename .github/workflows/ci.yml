@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DATABRICKS_CLI_VERSION: "1.19.0"
+  FD_LOG_LEVEL: WARNING
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+      - run: uv sync --locked --group dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  unit:
+    name: unit tests + bundle schema
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+      - name: Install Databricks CLI (pinned, checksum-verified)
+        run: |
+          set -euo pipefail
+          base="https://github.com/databricks/cli/releases/download/v${DATABRICKS_CLI_VERSION}"
+          file="databricks_cli_${DATABRICKS_CLI_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$file" "$base/$file"
+          curl -fsSL -o "$RUNNER_TEMP/SHA256SUMS" "$base/databricks_cli_${DATABRICKS_CLI_VERSION}_SHA256SUMS"
+          (cd "$RUNNER_TEMP" && grep " $file\$" SHA256SUMS | sha256sum -c -)
+          mkdir -p "$RUNNER_TEMP/dbcli" && tar -xzf "$RUNNER_TEMP/$file" -C "$RUNNER_TEMP/dbcli"
+          echo "$RUNNER_TEMP/dbcli" >> "$GITHUB_PATH"
+      - run: uv sync --locked --group dev
+      - run: uv run pytest -m "not spark and not airflow" -v
+
+  spark:
+    name: spark + pipeline end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+      - run: uv sync --locked --group dev --group spark
+      - run: uv run pytest -m spark -v
+
+  airflow:
+    name: airflow DAG integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+      - run: uv sync --locked --group dev --group airflow
+      - run: uv run pytest -m airflow -v
+        env:
+          AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+          AIRFLOW_HOME: ${{ runner.temp }}/airflow
+
+  compose:
+    name: docker compose smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KAGGLE_TOKEN_FILE: ${{ runner.temp }}/kaggle_token
+    steps:
+      - uses: actions/checkout@v7
+      - name: Dummy Kaggle secret (the DAG is only parsed here, never run)
+        run: printf 'not-a-real-token' > "$KAGGLE_TOKEN_FILE"
+      - run: docker compose -f airflow/docker-compose.yaml config --quiet
+      - run: docker compose -f airflow/docker-compose.yaml build
+      - name: Start Airflow and wait for every service to be healthy
+        run: docker compose -f airflow/docker-compose.yaml up -d --wait --wait-timeout 600
+      - name: DAG is registered without import errors
+        run: |
+          set -euo pipefail
+          c="docker compose -f airflow/docker-compose.yaml exec -T airflow-scheduler"
+          for i in $(seq 1 30); do
+            if $c airflow dags list -o plain | grep -q food_delivery_daily; then break; fi
+            sleep 10
+          done
+          $c airflow dags list -o plain | grep food_delivery_daily
+          errors=$($c airflow dags list-import-errors -o json)
+          echo "$errors"
+          test "$errors" = "[]" || test -z "$errors" || echo "$errors" | grep -q "No data found"
+      - name: Logs on failure
+        if: failure()
+        run: docker compose -f airflow/docker-compose.yaml logs --tail 200
+      - if: always()
+        run: docker compose -f airflow/docker-compose.yaml down -v
