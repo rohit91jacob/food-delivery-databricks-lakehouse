@@ -271,7 +271,7 @@ wheels = [
 
 [[package]]
 name = "apache-airflow-providers-databricks"
-version = "7.20.0"
+version = "7.21.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -284,9 +284,9 @@ dependencies = [
     { name = "pyarrow" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8f/50/97d018d5dfb4b6169983125228164efac2dd217ef11d64d056e7225df636/apache_airflow_providers_databricks-7.20.0.tar.gz", hash = "sha256:b780e4edb96ac9981c89ffcc0a2dbb03fe574014ec9fbb924919014b092ea382", size = 1109239, upload-time = "2026-09-14T14:48:08.09Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8c/3c/1e6a6d0f9950cbb3519872f59aa798d2a730e96204c7a1bcab7308c5df8b/apache_airflow_providers_databricks-7.21.0.tar.gz", hash = "sha256:4c850449cf651464abb1ce15d21e89e9271166c6d1930ee97efa0544723fa72c", size = 1110841, upload-time = "2026-09-29T06:55:29.434Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/84/f5/1359c6767710e9e3d9c3a82bd928a99f29a9cd52e980648a337ed0b19243/apache_airflow_providers_databricks-7.20.0-py3-none-any.whl", hash = "sha256:2d819247e082d134144d6c7325825a79e53ef4971e31842579345edf56436870", size = 120862, upload-time = "2026-09-14T14:47:27.521Z" },
+    { url = "https://files.pythonhosted.org/packages/49/e8/6d870a3a246ee9766901396bd4f73107ebf10eaaa6a9952f61dd6e63cfe2/apache_airflow_providers_databricks-7.21.0-py3-none-any.whl", hash = "sha256:0292681b19ba461231f1678ada342283b0490da11e6088dbb394a02b543b6e3e", size = 121351, upload-time = "2026-09-29T06:40:00.371Z" },
 ]
 
 [[package]]
@@ -654,15 +654,15 @@ wheels = [
 
 [[package]]
 name = "delta-spark"
-version = "4.0.1"
+version = "4.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "importlib-metadata" },
     { name = "pyspark" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8f/4d/9670c5b109fb1c7a84814525cb116203cc36a6112eca546785d617f41a08/delta_spark-4.0.1.tar.gz", hash = "sha256:066512d723f615c9a900e1aa4d83bbc7d0f27a1703e1d5dc52606ea51b8733cc", size = 35521, upload-time = "2026-01-10T02:40:50.315Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/21/1d/790855199ca10157df5552cbcfe957dcada5a82b21950e024336e67d77ad/delta_spark-4.4.0.tar.gz", hash = "sha256:7d1988ca6c3ef0ab1b886634ecdff56e930c5c2e3e479cce1125c82d7898ac3a", size = 46832, upload-time = "2026-08-20T06:38:01.32Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/13/22/a3716bc5ea86786be5f0afd09f62b20e6a111fa2d78868e930b19367a88c/delta_spark-4.0.1-py3-none-any.whl", hash = "sha256:ae0707eda68f05c6ec20b841c8966bb1201d1a5f124d9e94e8c2232162139be8", size = 43002, upload-time = "2026-01-10T02:40:49.047Z" },
+    { url = "https://files.pythonhosted.org/packages/03/0e/8b1df0a63b4f99fef19074c5ee51eb42423704d067c74a70b20fb688a730/delta_spark-4.4.0-py3-none-any.whl", hash = "sha256:f15cedc2c59855b1660a692f9aca1deac0c4dfcec46531b203025281b102e9c8", size = 54966, upload-time = "2026-08-20T06:38:00.261Z" },
 ]
 
 [[package]]
@@ -815,7 +815,7 @@ provides-extras = ["seed", "databricks"]
 [package.metadata.requires-dev]
 airflow = [
     { name = "apache-airflow", specifier = "==3.3.2" },
-    { name = "apache-airflow-providers-databricks", specifier = "==7.20.0" },
+    { name = "apache-airflow-providers-databricks", specifier = "==7.21.0" },
     { name = "databricks-sdk", specifier = "==0.148.0" },
     { name = "kaggle", specifier = "==2.2.4" },
 ]
@@ -827,8 +827,8 @@ dev = [
     { name = "ruff", specifier = "==0.16.10" },
 ]
 spark = [
-    { name = "delta-spark", specifier = "==4.0.1" },
-    { name = "pyspark", specifier = "==4.0.1" },
+    { name = "delta-spark", specifier = "==4.4.0" },
+    { name = "pyspark", specifier = "==4.2.0" },
 ]
 
 [[package]]
@@ -1006,14 +1006,14 @@ wheels = [
 
 [[package]]
 name = "importlib-metadata"
-version = "9.0.1"
+version = "8.7.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "zipp" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6f/7e/1e7e8dc30634b93ebb3d58a3dea569ad146e656218d3960ab04f62047b29/importlib_metadata-9.0.1.tar.gz", hash = "sha256:ab830580bc0ef3db61ce8fae716389e5462b67e033018bab6d8f80ef17172f99", size = 59124, upload-time = "2026-08-28T15:30:34.646Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/49/3b30cad09e7771a4982d9975a8cbf64f00d4a1ececb53297f1d9a7be1b10/importlib_metadata-8.7.1.tar.gz", hash = "sha256:49fef1ae6440c182052f407c8d34a68f72efc36db9ca90dc0113398f2fdde8bb", size = 57107, upload-time = "2025-12-21T10:00:19.278Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b3/55/ecca97ae19075f1fac62def77731e7f535e6c1fb8f92ff08160c5e6dade8/importlib_metadata-9.0.1-py3-none-any.whl", hash = "sha256:bba5600596a7e21f3eef53281cf28d6a5195634d2f2b78ff9501a3272c6eaab0", size = 27920, upload-time = "2026-08-28T15:30:33.433Z" },
+    { url = "https://files.pythonhosted.org/packages/fa/5e/f8e9a1d23b9c20a551a8a02ea3637b4642e22c2626e3a13a9a29cdea99eb/importlib_metadata-8.7.1-py3-none-any.whl", hash = "sha256:5a1f80bf1daa489495071efbb095d75a634cf28a8bc299581244063b53176151", size = 27865, upload-time = "2025-12-21T10:00:18.329Z" },
 ]
 
 [[package]]
@@ -1891,12 +1891,12 @@ wheels = [
 
 [[package]]
 name = "pyspark"
-version = "4.0.1"
+version = "4.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "py4j" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ae/40/1414582f16c1d7b051c668c2e19c62d21a18bd181d944cb24f5ddbb2423f/pyspark-4.0.1.tar.gz", hash = "sha256:9d1f22d994f60369228397e3479003ffe2dd736ba79165003246ff7bd48e2c73", size = 434204896, upload-time = "2025-09-06T07:15:57.091Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/33/c987434f5d50aa802779a004ca0fd45ee4350caab50554ad7283d5a22b50/pyspark-4.2.0.tar.gz", hash = "sha256:5ad689d53570ee1674193fd4f9bda065f0db3be9363a27d2a3406cc457b70b61", size = 450129423, upload-time = "2026-07-14T22:16:46Z" }
 
 [[package]]
 name = "pytest"
