@@ -30,12 +30,12 @@ dev = [
     "regex==2026.9.29",
 ]
 spark = [
-    "pyspark==4.0.1",
-    "delta-spark==4.0.1",
+    "pyspark==4.2.0",
+    "delta-spark==4.4.0",
 ]
 airflow = [
     "apache-airflow==3.3.2",
-    "apache-airflow-providers-databricks==7.20.0",
+    "apache-airflow-providers-databricks==7.21.0",
     "kaggle==2.2.4",
     "databricks-sdk==0.148.0",
 ]
