@@ -1,0 +1,79 @@
+"""Builds the restaurant seed: Kaggle download (CC0 Swiggy dataset) or synthetic fallback.
+
+The Kaggle client reads credentials from ``KAGGLE_API_TOKEN`` or ``~/.kaggle/access_token``.
+In containers, point ``FD_KAGGLE_TOKEN_FILE`` at a mounted secret instead; it is loaded
+into the environment of this process only and never logged.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
+from fooddelivery.config import GeneratorConfig, Paths
+from fooddelivery.generator.seed import (
+    KAGGLE_DATASET,
+    KAGGLE_FILE,
+    KAGGLE_LICENSE,
+    load_swiggy_csv,
+    read_seed,
+    synthetic_seed,
+    write_seed,
+)
+
+log = logging.getLogger(__name__)
+
+
+def _load_token_file() -> None:
+    token_file = os.environ.get("FD_KAGGLE_TOKEN_FILE", "").strip()
+    if token_file and not os.environ.get("KAGGLE_API_TOKEN"):
+        os.environ["KAGGLE_API_TOKEN"] = Path(token_file).expanduser().read_text().strip()
+
+
+def download_kaggle_csv(dest_dir: Path, dataset: str = KAGGLE_DATASET) -> Path:
+    """Download into a fresh, empty directory (downloads are untrusted data) and return the CSV."""
+    _load_token_file()
+    from kaggle.api.kaggle_api_extended import KaggleApi  # optional dependency (extra: seed)
+
+    api = KaggleApi()
+    api.authenticate()
+    dest_dir.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix="kaggle-", dir=dest_dir.parent))
+    try:
+        api.dataset_download_files(dataset, path=str(staging), unzip=True, quiet=True)
+        csv_path = staging / KAGGLE_FILE
+        if not csv_path.is_file():
+            raise FileNotFoundError(f"{KAGGLE_FILE} not found in Kaggle dataset {dataset}")
+        if dest_dir.exists():
+            shutil.rmtree(dest_dir)
+        staging.rename(dest_dir)
+        return dest_dir / KAGGLE_FILE
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+
+
+def ensure_seed(paths: Paths, cfg: GeneratorConfig, source: str | None = None, *, force: bool = False) -> dict:
+    """Create the seed file once; afterwards it is reused so simulations stay reproducible."""
+    source = (source or os.environ.get("FD_SEED_SOURCE", "kaggle")).strip().lower()
+    if paths.seed_file.exists() and not force:
+        seeds = read_seed(paths.seed_file)
+        log.info("seed already present", extra={"restaurants": len(seeds), "path": str(paths.seed_file)})
+        return {"restaurants": len(seeds), "reused": True}
+    if source == "kaggle":
+        csv_path = download_kaggle_csv(paths.downloads / "swiggy-restaurant-dataset")
+        seeds = load_swiggy_csv(csv_path)
+        meta = write_seed(seeds, paths.seed_file, source=f"kaggle:{KAGGLE_DATASET}", license_name=KAGGLE_LICENSE)
+    elif source == "synthetic":
+        seeds = synthetic_seed(cfg.cities, max(cfg.restaurants_per_city, 50))
+        meta = write_seed(seeds, paths.seed_file, source="synthetic", license_name="MIT")
+    else:
+        raise ValueError(f"FD_SEED_SOURCE must be 'kaggle' or 'synthetic', got {source!r}")
+    missing = [c for c in cfg.cities if c not in meta["cities"]]
+    if missing:
+        raise ValueError(f"seed has no restaurants for cities {missing}")
+    log.info("seed written", extra={"restaurants": meta["restaurants"], "source": meta["source"]})
+    return {**meta, "reused": False}
