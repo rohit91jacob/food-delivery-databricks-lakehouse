@@ -84,12 +84,12 @@ jobs:
     name: docker compose smoke test
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      KAGGLE_TOKEN_FILE: ${{ runner.temp }}/kaggle_token
     steps:
       - uses: actions/checkout@v7
       - name: Dummy Kaggle secret (the DAG is only parsed here, never run)
-        run: printf 'not-a-real-token' > "$KAGGLE_TOKEN_FILE"
+        run: |
+          printf 'not-a-real-token' > "$RUNNER_TEMP/kaggle_token"
+          echo "KAGGLE_TOKEN_FILE=$RUNNER_TEMP/kaggle_token" >> "$GITHUB_ENV"
       - run: docker compose -f airflow/docker-compose.yaml config --quiet
       - run: docker compose -f airflow/docker-compose.yaml build
       - name: Start Airflow and wait for every service to be healthy
