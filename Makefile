@@ -33,7 +33,7 @@ test-spark: ## SCD + pipeline end-to-end on local Spark/Delta (needs Java 17+)
 test-airflow: ## DAG integrity
 	AIRFLOW__CORE__LOAD_EXAMPLES=false uv run pytest -m airflow
 
-seed: ## build the restaurant seed (Kaggle; FD_SEED_SOURCE=synthetic to skip Kaggle)
+seed: ## install the restaurant seed (committed CC0 copy; FD_SEED_SOURCE=kaggle to rebuild from Kaggle)
 	uv run fd seed
 
 generate: ## generate landing files: make generate DATE=2026-09-01 DAYS=3

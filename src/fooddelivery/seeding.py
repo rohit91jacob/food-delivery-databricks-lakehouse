@@ -1,5 +1,7 @@
-"""Builds the restaurant seed: Kaggle download (CC0 Swiggy dataset) or synthetic fallback.
+"""Builds the restaurant seed: the committed copy (default), a Kaggle download, or a synthetic fallback.
 
+``committed`` unpacks ``seed/restaurants.jsonl.gz``, which is checked into the repository (the Kaggle
+dataset is CC0) and verified against its recorded SHA-256, so scheduled runs need no Kaggle account.
 The Kaggle client reads credentials from ``KAGGLE_API_TOKEN`` or ``~/.kaggle/access_token``.
 In containers, point ``FD_KAGGLE_TOKEN_FILE`` at a mounted secret instead; it is loaded
 into the environment of this process only and never logged.
@@ -7,6 +9,9 @@ into the environment of this process only and never logged.
 
 from __future__ import annotations
 
+import gzip
+import hashlib
+import json
 import logging
 import os
 import shutil
@@ -25,6 +30,9 @@ from fooddelivery.generator.seed import (
 )
 
 log = logging.getLogger(__name__)
+
+# Repository copy of the seed; FD_COMMITTED_SEED points elsewhere (e.g. inside a container image).
+DEFAULT_COMMITTED_SEED = Path(__file__).resolve().parents[2] / "seed" / "restaurants.jsonl.gz"
 
 
 def _load_token_file() -> None:
@@ -56,14 +64,35 @@ def download_kaggle_csv(dest_dir: Path, dataset: str = KAGGLE_DATASET) -> Path:
             shutil.rmtree(staging, ignore_errors=True)
 
 
+def install_committed_seed(paths: Paths, archive: Path | None = None) -> dict:
+    """Unpack the committed seed into ``paths.seed_file`` after checking it against its recorded SHA-256."""
+    archive = archive or Path(os.environ.get("FD_COMMITTED_SEED", "") or DEFAULT_COMMITTED_SEED)
+    meta_path = archive.parent / "restaurants.meta.json"
+    if not archive.is_file() or not meta_path.is_file():
+        raise FileNotFoundError(
+            f"committed seed not found at {archive}; set FD_COMMITTED_SEED or FD_SEED_SOURCE=kaggle"
+        )
+    meta = json.loads(meta_path.read_text())
+    payload = gzip.decompress(archive.read_bytes())
+    digest = hashlib.sha256(payload).hexdigest()
+    if digest != meta["sha256"]:
+        raise ValueError(f"committed seed checksum mismatch: {digest} != {meta['sha256']}")
+    paths.seed_file.parent.mkdir(parents=True, exist_ok=True)
+    paths.seed_file.write_bytes(payload)
+    paths.seed_file.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n")
+    return meta
+
+
 def ensure_seed(paths: Paths, cfg: GeneratorConfig, source: str | None = None, *, force: bool = False) -> dict:
     """Create the seed file once; afterwards it is reused so simulations stay reproducible."""
-    source = (source or os.environ.get("FD_SEED_SOURCE", "kaggle")).strip().lower()
+    source = (source or os.environ.get("FD_SEED_SOURCE", "committed")).strip().lower()
     if paths.seed_file.exists() and not force:
         seeds = read_seed(paths.seed_file)
         log.info("seed already present", extra={"restaurants": len(seeds), "path": str(paths.seed_file)})
         return {"restaurants": len(seeds), "reused": True}
-    if source == "kaggle":
+    if source == "committed":
+        meta = install_committed_seed(paths)
+    elif source == "kaggle":
         csv_path = download_kaggle_csv(paths.downloads / "swiggy-restaurant-dataset")
         seeds = load_swiggy_csv(csv_path)
         meta = write_seed(seeds, paths.seed_file, source=f"kaggle:{KAGGLE_DATASET}", license_name=KAGGLE_LICENSE)
@@ -71,7 +100,7 @@ def ensure_seed(paths: Paths, cfg: GeneratorConfig, source: str | None = None, *
         seeds = synthetic_seed(cfg.cities, max(cfg.restaurants_per_city, 50))
         meta = write_seed(seeds, paths.seed_file, source="synthetic", license_name="MIT")
     else:
-        raise ValueError(f"FD_SEED_SOURCE must be 'kaggle' or 'synthetic', got {source!r}")
+        raise ValueError(f"FD_SEED_SOURCE must be 'committed', 'kaggle' or 'synthetic', got {source!r}")
     missing = [c for c in cfg.cities if c not in meta["cities"]]
     if missing:
         raise ValueError(f"seed has no restaurants for cities {missing}")

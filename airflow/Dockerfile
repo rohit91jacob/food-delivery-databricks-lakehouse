@@ -19,4 +19,8 @@ COPY --chown=airflow:root pyproject.toml README.md LICENSE /opt/fooddelivery/
 COPY --chown=airflow:root src /opt/fooddelivery/src
 RUN pip install --no-cache-dir "/opt/fooddelivery[seed,databricks]" --constraint "${CONSTRAINTS_URL}"
 
+# The committed CC0 restaurant seed, so the default FD_SEED_SOURCE=committed needs no Kaggle token.
+COPY --chown=airflow:root seed /opt/fooddelivery/seed
+ENV FD_COMMITTED_SEED=/opt/fooddelivery/seed/restaurants.jsonl.gz
+
 COPY --chown=airflow:root airflow/dags /opt/airflow/dags

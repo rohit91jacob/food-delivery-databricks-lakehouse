@@ -1,0 +1,17 @@
+{
+  "cities": [
+    "Ahmedabad",
+    "Bangalore",
+    "Chennai",
+    "Delhi",
+    "Hyderabad",
+    "Kolkata",
+    "Mumbai",
+    "Pune",
+    "Surat"
+  ],
+  "license": "CC0-1.0",
+  "restaurants": 8673,
+  "sha256": "4dc64a325866a61eeefc8cba3f64527de6921573ab140b1d152d3a41b95ff1db",
+  "source": "kaggle:abhijitdahatonde/swiggy-restuarant-dataset"
+}
