@@ -1,6 +1,7 @@
 # food-delivery-databricks-lakehouse
 
 [![CI](https://github.com/rohit91jacob/food-delivery-databricks-lakehouse/actions/workflows/ci.yml/badge.svg)](https://github.com/rohit91jacob/food-delivery-databricks-lakehouse/actions/workflows/ci.yml)
+[![Scheduled refresh](https://github.com/rohit91jacob/food-delivery-databricks-lakehouse/actions/workflows/refresh.yml/badge.svg)](https://github.com/rohit91jacob/food-delivery-databricks-lakehouse/actions/workflows/refresh.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)
 ![Databricks Free Edition](https://img.shields.io/badge/Databricks-Free%20Edition-FF3621.svg)
@@ -15,10 +16,12 @@ lifecycle events, rider dispatch and GPS pings, payments, refunds, ratings, prom
 writes a **ground-truth manifest** alongside the data, and the platform proves that every gold metric matches
 it **exactly**, every day.
 
-> **Status.** The pipeline is deployed to a Databricks Free Edition workspace (dev target) and runs end to end
-> from Airflow. For business dates 2026-09-01 to 2026-09-03, gold matches the generator manifest **exactly**: all
-> 26 metrics x 5 cities, checked both by the job's DQ gate and by Airflow's independent reconciliation. See
-> [Live verification](#live-verification-databricks-free-edition).
+> **Status.** The pipeline is deployed to a Databricks Free Edition workspace (dev target). A **nightly GitHub
+> Actions refresh** adds one business date at a time: it generates the day, uploads it, runs the job, and
+> reconciles gold with the generator manifest. For every date processed so far, gold matches the manifest
+> **exactly**: all 26 metrics x 5 cities, checked both by the job's DQ gate and by an independent reconciliation.
+> See [Live verification](#live-verification-databricks-free-edition) and
+> [Scheduling & freshness](#scheduling--freshness).
 
 ---
 
@@ -50,14 +53,15 @@ flowchart LR
 
 | Component | Where | What it does |
 |---|---|---|
-| Seed builder | `src/fooddelivery/seeding.py`, `generator/seed.py` | Downloads and normalises `abhijitdahatonde/swiggy-restuarant-dataset` (8,673 restaurants after cleaning), or synthesises a seed |
+| Seed | `seed/`, `src/fooddelivery/seeding.py`, `generator/seed.py` | The normalised CC0 Kaggle seed (8,673 restaurants) is committed and checksum-verified; `FD_SEED_SOURCE=kaggle` rebuilds it from `abhijitdahatonde/swiggy-restuarant-dataset` |
 | Simulator | `src/fooddelivery/generator/` | 14 raw feeds plus a manifest per business date. Byte-for-byte reproducible; injects duplicates and corrupt rows on purpose |
 | Landing sync | `src/fooddelivery/landing/uploader.py` | Files API upload to a UC volume. Skips unchanged files, prunes stale versions, commit-marker index |
 | Lakeflow pipeline | `src/fooddelivery_pipeline/transformations/` | Bronze (Auto Loader) → silver (expectations, quarantine, AUTO CDC SCD1/SCD2) → gold (12 materialized views) |
 | Shared logic | `src/fooddelivery/transforms/` | Schemas, rules and transformations, importable by the pipeline because its `root_path` is `src/` (on `sys.path`) |
 | DQ gate | `src/fooddelivery/quality/` | 13 checks (`fd-dq` job task → `dq_results`) plus independent Airflow reconciliation SQL |
 | Bundle (IaC) | `databricks.yml`, `resources/*.yml` | Schema, volume, pipeline, job, dashboard; `dev`/`prod` targets |
-| Orchestration | `airflow/` | DAG, image, docker-compose (LocalExecutor) |
+| Scheduled refresh | `.github/workflows/refresh.yml`, `src/fooddelivery/refresh.py` | Nightly hosted run: credential check → next date → generate → upload → job → reconcile, opening an issue on failure |
+| Orchestration (self-hosted) | `airflow/` | DAG, image, docker-compose (LocalExecutor) |
 | Offline emulator | `src/fooddelivery/local/` | Runs the **unchanged** pipeline files on local Spark with shims ([ADR 0004](docs/adr/0004-local-pipeline-emulator.md)) |
 
 ## Tech stack (pinned)
@@ -78,8 +82,8 @@ flowchart LR
 
 | Source | Licence | Refresh |
 |---|---|---|
-| Kaggle [`abhijitdahatonde/swiggy-restuarant-dataset`](https://www.kaggle.com/datasets/abhijitdahatonde/swiggy-restuarant-dataset) (`swiggy.csv`): restaurant names, areas, cuisines, price-for-two, ratings, listed delivery time | **CC0-1.0** (public domain). Raw data is never committed | Downloaded once on first run and reused, so simulations stay reproducible. `fd seed --force` rebuilds it |
-| Synthetic generator (this repo): customers, menus, orders, events, riders, shifts, GPS, payments, refunds, ratings, promotions, weather/traffic/surge | MIT (code) | One business date per day (Airflow `@daily` in Asia/Kolkata); any date can be regenerated |
+| Kaggle [`abhijitdahatonde/swiggy-restuarant-dataset`](https://www.kaggle.com/datasets/abhijitdahatonde/swiggy-restuarant-dataset) (`swiggy.csv`): restaurant names, areas, cuisines, price-for-two, ratings, listed delivery time | **CC0-1.0** (public domain). The raw CSV is not committed; the normalised seed derived from it is (`seed/`, see [seed/README.md](seed/README.md)) | Static (the dataset's `expectedUpdateFrequency` is "never"). The committed seed keeps simulations reproducible; `FD_SEED_SOURCE=kaggle fd seed --force` rebuilds it |
+| Synthetic generator (this repo): customers, menus, orders, events, riders, shifts, GPS, payments, refunds, ratings, promotions, weather/traffic/surge | MIT (code) | One business date per night (`refresh.yml`, or Airflow `@daily` in Asia/Kolkata); any date can be regenerated |
 | City-centre coordinates | Public knowledge | Static |
 
 Why this dataset, and which ones were rejected: [ADR 0006](docs/adr/0006-kaggle-seed.md).
@@ -105,7 +109,7 @@ Full column-level detail is in [docs/data_dictionary.md](docs/data_dictionary.md
 
 ### Prerequisites
 - [uv](https://docs.astral.sh/uv/), Python 3.12 and Java 17+ (Java is only needed for the Spark tests and `fd local-run`)
-- A Kaggle API token in `~/.kaggle/access_token`. Without one, set `FD_SEED_SOURCE=synthetic`
+- No Kaggle account: the seed is committed. A Kaggle token is only needed for `FD_SEED_SOURCE=kaggle`
 - For deployment: a Databricks Free Edition workspace, a personal access token, and the Databricks CLI ≥ 1.19
 - Optional: Docker for the compose deployment
 
@@ -115,7 +119,7 @@ Full column-level detail is in [docs/data_dictionary.md](docs/data_dictionary.md
 uv sync --group dev --group spark --extra seed --extra databricks
 export FD_DATA_DIR=$HOME/fd-work/data
 
-uv run fd seed                                    # Kaggle download + normalisation
+uv run fd seed                                    # unpack the committed seed + verify its sha256
 uv run fd generate --date 2026-09-01 --days 3     # landing files + manifest
 uv run fd local-run                               # real pipeline sources on local Spark + the 13 DQ checks
 ```
@@ -184,7 +188,8 @@ Every variable is in [`.env.example`](.env.example) (CLI and tests) and [`airflo
 | `FD_RIDERS_PER_100_ORDERS` | `18` | Fleet size relative to demand |
 | `FD_GPS_PING_SECONDS` | `120` | GPS ping interval while on an order |
 | `FD_DUPLICATE_RATE` / `FD_INVALID_RATE` | `0.003` / `0.002` | Injected duplicates / corrupt orders |
-| `FD_SEED_SOURCE` | `kaggle` | `kaggle` or `synthetic` |
+| `FD_SEED_SOURCE` | `committed` | `committed` (the repo's CC0 seed), `kaggle` (rebuild from Kaggle) or `synthetic` |
+| `FD_COMMITTED_SEED` | `seed/restaurants.jsonl.gz` | Location of the committed seed (the Airflow image sets it) |
 | `FD_KAGGLE_TOKEN_FILE` | empty | File holding a `KGAT_` token (containers) |
 | `FD_DATA_DIR` | `data` | Local landing zone, seed and downloads |
 | `FD_CATALOG` / `FD_SCHEMA` / `FD_VOLUME` | `workspace` / `fooddelivery` / `landing` | UC target; dev schema is `dev_<user>_fooddelivery` |
@@ -196,11 +201,30 @@ Every variable is in [`.env.example`](.env.example) (CLI and tests) and [`airflo
 | `FD_LOG_LEVEL` / `FD_LOG_FORMAT` | `INFO` / `json` | Structured logging |
 | `FD_SPARK_MASTER` / `FD_SPARK_DRIVER_MEMORY` / `FD_SPARK_JARS` | `local[4]` / `2g` / empty | Local Spark; `FD_SPARK_JARS` takes offline Delta jars |
 
+### GitHub Actions configuration
+
+Set these in **Settings → Secrets and variables → Actions**. None of them are needed for CI; the Databricks jobs
+skip cleanly without them.
+
+| Kind | Name | Used by | Purpose |
+|---|---|---|---|
+| Variable (or secret) | `DATABRICKS_HOST` | refresh, deploy | Workspace URL |
+| Variable | `DATABRICKS_CLIENT_ID` | refresh (deploy if opted in) | Service principal application ID; enables OAuth M2M, or GitHub OIDC if no secret is set |
+| Secret | `DATABRICKS_CLIENT_SECRET` | refresh (deploy if opted in) | Service principal OAuth secret (≤ 730 days) |
+| Variable | `DATABRICKS_CLIENT_SECRET_EXPIRES` | refresh | `YYYY-MM-DD`, so the credential check can warn before the secret expires |
+| Secret | `DATABRICKS_TOKEN` | deploy; refresh until the service principal exists | Personal access token (≤ 730 days in this workspace) |
+| Variable | `DATABRICKS_TOKEN_ID` | refresh | Pins which PAT the expiry check judges |
+| Variable | `FD_DEPLOY_AUTH` | deploy | `service-principal` to deploy as the service principal (an advanced migration; see the auth guide) |
+| Variable | `FD_CREDENTIAL_WARN_DAYS` | refresh | Warning window, default `14` |
+| Variables | `FD_CATALOG`, `FD_SCHEMA`, `FD_GOLD_SCHEMA`, `FD_DATABRICKS_JOB_NAME` | refresh | Target overrides; the defaults are this repo's dev deployment |
+
+Step-by-step setup and renewal: **[docs/databricks_auth.md](docs/databricks_auth.md)**.
+
 ## Testing & CI
 
 ```bash
 uv run ruff check . && uv run ruff format --check .
-uv run pytest -m "not spark and not airflow"     # 26 tests: generator, seed, config, uploader, SQL, bundle schema
+uv run pytest -m "not spark and not airflow"     # 49 tests: generator, seed, config, uploader, SQL, bundle schema, refresh/auth logic
 uv run pytest -m spark                            # 10 tests: SCD semantics + pipeline end-to-end (emulator + DQ)
 AIRFLOW__CORE__LOAD_EXAMPLES=false uv run pytest -m airflow   # 3 tests: DAG integrity
 ```
@@ -214,14 +238,18 @@ All of these ran locally (WSL, Java 21).
 | `ci.yml` / spark | Java 17: SCD1/SCD2 semantics; the real pipeline sources emulated end to end; every error-severity DQ check per day; exact dedupe/quarantine counts; SCD2 point-in-time pricing; the Airflow reconciliation SQL passing, then catching a 1-paisa tamper; idempotent rerun |
 | `ci.yml` / airflow | DagBag import, task graph, retries, `depends_on_past`, deferrable trigger |
 | `ci.yml` / compose | `docker compose config`, image build, `up --wait` (all services healthy), DAG registered without import errors |
-| `deploy.yml` | `bundle validate` + `deploy` (dev on PRs, prod on `main`). **Skipped cleanly until `DATABRICKS_HOST`/`DATABRICKS_TOKEN` repo secrets exist** |
+| `deploy.yml` | `bundle validate` + `deploy` (dev on PRs, prod on `main`). Skipped cleanly until a host and credential are configured |
+| `refresh.yml` | Nightly (01:00 UTC) and manual: credential health → next business date → generate → upload → job → reconciliation, with an issue on failure |
+| `keepalive.yml` | Monthly: re-enables the scheduled workflows so GitHub's 60-day inactivity rule never switches them off |
 
 Dependabot covers Actions, uv and Docker. pre-commit runs ruff and basic hygiene hooks.
 
 ## Operations
 
-- **Scheduling:** Airflow `food_delivery_daily` at 00:00 IST, `catchup=True`, `max_active_runs=1` (Free Edition
-  allows one active pipeline update). The bundle job's own schedule ships paused.
+- **Scheduling:** the hosted nightly refresh (`refresh.yml`, below). Alternatively, self-host Airflow
+  `food_delivery_daily` (00:00 IST, `catchup=True`, `max_active_runs=1`; Free Edition allows one active
+  pipeline update). Run one or the other against a target, never both. The bundle job's own schedule ships
+  paused.
 - **Backfill/reprocessing:** `airflow backfill create --dag-id food_delivery_daily --from-date … --to-date …`.
   Every step is idempotent per date ([ADR 0002](docs/adr/0002-idempotency.md)). After a generator change, bump
   `GENERATOR_VERSION` and full-refresh the pipeline.
@@ -229,7 +257,38 @@ Dependabot covers Actions, uv and Docker. pre-commit runs ruff and basic hygiene
   and independent reconciliation from Airflow ([ADR 0005](docs/adr/0005-layered-data-quality.md)).
 - **Monitoring/alerts:** pipeline and job failure emails to the deployer, the Airflow `on_failure_callback`
   webhook, `dq_results` history, and the AI/BI dashboard.
-- Runbook (backfills, DQ triage, quota exhaustion, credential rotation, dev reset): [docs/runbook.md](docs/runbook.md).
+- **Credentials:** see [Scheduling & freshness](#scheduling--freshness) and [docs/databricks_auth.md](docs/databricks_auth.md).
+- Runbook (scheduled refresh failures, backfills, DQ triage, quota exhaustion, credential rotation, dev reset):
+  [docs/runbook.md](docs/runbook.md).
+
+## Scheduling & freshness
+
+| What | Cadence | How |
+|---|---|---|
+| New data | **Nightly**, 01:00 UTC (06:30 IST) | `refresh.yml` processes the next business date: the newest date in `gold_daily_kpis`, plus one. It stops when the simulated calendar reaches today (IST). |
+| Re-processing a date | On demand | **Actions → Scheduled refresh → Run workflow** with `business_date`. Every step is idempotent. |
+| Code | On every push to `main` | CI, then `deploy.yml` (prod target) |
+| Dependencies | Weekly | Dependabot PRs, each tested by CI |
+| Schedule keep-alive | Monthly | `keepalive.yml` re-enables scheduled workflows through the API, with no commits |
+
+**Cost:** one date uses about 16 minutes of Free Edition serverless compute (about 9 for the pipeline refresh). If
+the daily fair-use quota runs out, compute stops until the next day, and the next nightly run simply retries the
+same date. To use less, change the cron, e.g. `0 1 * * 1,4`.
+
+**Credentials, and how they stay valid:**
+
+| Credential | Lifetime | Who renews it, and when |
+|---|---|---|
+| `GITHUB_TOKEN` (issues, keep-alive) | per run | GitHub, automatically |
+| Kaggle token | not needed | the CC0 seed is committed |
+| Service principal OAuth secret (recommended for the refresh) | ≤ 730 days | You, every two years; an issue warns 14 days ahead |
+| PAT (`DATABRICKS_TOKEN`, deploys) | ≤ 730 days | You, every two years; the refresh's check also warns if it's the active credential |
+| GitHub OIDC federation (no secret at all) | never | Supported by the workflow, but it needs account-level APIs, which Free Edition lacks |
+
+Before touching data, every refresh runs a **credential health** job. It authenticates, reads the remaining lifetime,
+and fails within 14 days of expiry. It then opens (or comments on) a *"Databricks credential needs attention"*
+issue. Any other failure opens *"Scheduled refresh failed"*. GitHub also emails you about failed scheduled runs.
+Details: [ADR 0007](docs/adr/0007-unattended-auth.md).
 
 ## Project structure
 
@@ -245,13 +304,15 @@ Dependabot covers Actions, uv and Docker. pre-commit runs ruff and basic hygiene
 │   │   ├── quality/               # DQ check catalog, fd-dq runner, Airflow reconciliation SQL
 │   │   ├── landing/uploader.py    # Files API sync
 │   │   ├── local/                 # pipeline emulator + local AUTO CDC (SCD1/SCD2)
+│   │   ├── refresh.py             # scheduled refresh: auth selection, credential health, job + SQL helpers
 │   │   ├── seeding.py, config.py, logs.py, cli.py
 │   └── fooddelivery_pipeline/transformations/   # bronze_ingest.py, silver_conform.py, gold_marts.py
 ├── airflow/                       # dags/, Dockerfile, docker-compose.yaml, .env.example
 ├── tests/                         # unit/, spark/, airflow/
-├── docs/                          # data_dictionary.md, metrics.md, runbook.md, adr/
-├── scripts/bundle_env.py
-├── .github/                       # workflows/ci.yml, workflows/deploy.yml, dependabot.yml
+├── seed/                          # committed CC0 restaurant seed + checksum + attribution
+├── docs/                          # databricks_auth.md, data_dictionary.md, metrics.md, runbook.md, adr/
+├── scripts/                       # bundle_env.py, gh_issue.sh
+├── .github/                       # workflows/{ci,deploy,refresh,keepalive}.yml, dependabot.yml
 ├── Makefile, pyproject.toml, uv.lock, .env.example, .pre-commit-config.yaml
 ```
 
@@ -270,6 +331,10 @@ Dependabot covers Actions, uv and Docker. pre-commit runs ruff and basic hygiene
   and replayable.
 - **Emulator instead of mocks** ([ADR 0004](docs/adr/0004-local-pipeline-emulator.md)). The CI tests execute the
   same pipeline files that Databricks runs.
+- **Hosted refresh on GitHub Actions, credentials that renew on a two-year cycle**
+  ([ADR 0007](docs/adr/0007-unattended-auth.md)). A dedicated least-privilege service principal with an OAuth
+  secret, because Free Edition has no account-level token federation. The refresh fails early with a dated
+  issue instead of quietly going stale.
 
 ## Live verification (Databricks Free Edition)
 
@@ -314,7 +379,8 @@ A DAG run takes about 16 minutes, about 9 of which are the serverless pipeline u
 
 ## Roadmap
 
-- Run the scheduled DAG continuously on a hosted Airflow (compose) against prod.
+- Move the nightly refresh from dev to prod once the prod target has been run end to end.
+- GitHub OIDC token federation (no stored secret) on an edition with account-level APIs.
 - File-arrival trigger on the volume instead of Airflow-triggered runs (paid tiers).
 - Streaming file drops (intraday micro-batches) for near-real-time SLA tiles.
 - Unity Catalog metric views / Genie space over `gold_*`.
@@ -322,5 +388,6 @@ A DAG run takes about 16 minutes, about 9 of which are the serverless pipeline u
 
 ## License
 
-Code: [MIT](LICENSE). Seed data: Kaggle `abhijitdahatonde/swiggy-restuarant-dataset`, CC0-1.0, downloaded at
-runtime and never redistributed in this repo.
+Code: [MIT](LICENSE). Seed data: derived from the Kaggle `abhijitdahatonde/swiggy-restuarant-dataset` by Abhijit
+Dahatonde, published under CC0-1.0 (public domain). The normalised seed is redistributed in `seed/` with
+attribution; the raw CSV is not.

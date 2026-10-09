@@ -2,7 +2,10 @@
 
 ## Daily operation
 
-- Airflow DAG `food_delivery_daily` runs at 00:00 Asia/Kolkata for the business date that just ended
+- **Hosted (what runs today):** the GitHub Actions workflow `refresh.yml` processes one business date per
+  night on the dev target ([Scheduled refresh](#scheduled-refresh)). It does the same steps as the DAG.
+  Run either it or Airflow, not both against the same target.
+- **Self-hosted alternative:** the Airflow DAG `food_delivery_daily` runs at 00:00 Asia/Kolkata for the business date that just ended
   (interval `[D 00:00, D+1 00:00)` IST). Its steps are prepare_seed → generate_batch → upload_batch →
   run_lakehouse_job → reconcile_gold_with_manifest → publish_summary.
 - The Databricks job `fooddelivery_daily` runs the pipeline refresh first, then `data_quality` (`fd-dq`). Its own
@@ -58,12 +61,40 @@ each date.
 
 Quarantined rows: `SELECT _failed_rules, count(*) FROM quarantine_orders GROUP BY 1`.
 
+## Scheduled refresh
+
+`.github/workflows/refresh.yml` runs nightly at 01:00 UTC (06:30 IST). It processes the **next
+unprocessed business date** on the dev target: the newest date in `gold_daily_kpis` plus one. It
+runs as one `concurrency` group, so runs never overlap. Each run writes a summary (job state, minutes,
+reconciliation result) to the run page.
+
+| Symptom | Cause | Action |
+|---|---|---|
+| Issue **"Databricks credential needs attention"**; `credential health` failed | The credential is rejected, missing, or expires within 14 days | Renew it with [databricks_auth.md](databricks_auth.md), then **Run workflow**. No data was touched. |
+| Issue **"Scheduled refresh failed"** at *Run the Lakeflow job* with `exceeded quota` / compute unavailable | Daily fair-use quota spent | Nothing to fix. The next night processes the same date again (gold is the source of truth). See below. |
+| Fails at *Run the Lakeflow job* with a pipeline error | A code or data problem | Open the job run link from the log. Fix it, push, then **Run workflow** with the same `business_date`. |
+| Fails at *Reconcile gold with the manifest* | Gold ≠ ground truth | Treat it as a data-quality incident ([below](#data-quality-failures)). The `raise_error` message lists the city and metric. |
+| SQL step times out | Warehouse cold start or quota | Re-run. Statements are bounded at 15 minutes, the job at 90. |
+| "Gold is caught up with today; nothing to process." | The simulated calendar reached today (IST) | Expected. Runs resume as the days pass. |
+| Scheduled runs stopped appearing | GitHub disabled schedules after 60 days without repository activity | `keepalive.yml` re-enables them monthly. Run it manually, or click **Enable workflow** in the Actions tab. |
+
+**Re-running a date:** Actions → **Scheduled refresh** → **Run workflow** → `business_date: 2026-09-04`. Every
+step is idempotent: generation is byte-identical, the upload skips unchanged files, the pipeline dedupes, and
+the reconciliation re-checks. Re-running a reconciled date is a safe no-op apart from the compute it uses.
+
+**Pausing:** disable the workflow in the Actions tab, or edit the cron. Nothing in the workspace needs
+changing.
+
 ## Free Edition quota exhausted
 
-If compute shuts down for the day ("exceeded quota"), the job and Airflow tasks fail and retry. Let the DAG run
-fail, wait for the daily reset, then clear the failed task instances (or rerun the backfill). Nothing is lost,
-because the landing files are already uploaded and every step is idempotent. To spend less quota, lower
-`FD_BASE_ORDERS_PER_CITY`, reduce `FD_CITIES`, or raise `FD_GPS_PING_SECONDS`.
+If compute shuts down for the day ("exceeded quota"), the job and the Airflow or GitHub refresh tasks fail.
+For Airflow, let the DAG run fail, wait for the daily reset, then clear the failed task instances (or rerun the
+backfill). The GitHub refresh needs nothing: the next nightly run retries the same date. Nothing is lost,
+because the landing files are already uploaded and every step is idempotent.
+
+One business date costs about 16 minutes of serverless compute, about 9 of them the pipeline refresh. A nightly
+refresh therefore spends a meaningful share of the daily quota. To spend less, run less often (for example
+`cron: "0 1 * * 1,4"`), lower `FD_BASE_ORDERS_PER_CITY`, reduce `FD_CITIES`, or raise `FD_GPS_PING_SECONDS`.
 
 ## Removing a dataset from the pipeline
 
@@ -74,10 +105,16 @@ in each target with `DROP TABLE <catalog>.<schema>.<name>`. In dev, `databricks 
 
 ## Credentials
 
-- Databricks: a PAT in the Airflow connection `databricks_default` (`AIRFLOW_CONN_DATABRICKS_DEFAULT`), and repo
-  secrets `DATABRICKS_HOST` / `DATABRICKS_TOKEN` for CI deploys. Rotate the PAT in the workspace, then update both.
-- Kaggle: a `KGAT_` token in `~/.kaggle/access_token` (local) or the compose secret `kaggle_token`. It is only
-  needed the first time the seed is built.
+| Credential | Used by | Lifetime | Renew |
+|---|---|---|---|
+| Service principal OAuth secret (`DATABRICKS_CLIENT_ID` variable + `DATABRICKS_CLIENT_SECRET` secret) | `refresh.yml` | ≤ 730 days | Generate a second secret, swap it in, delete the old one ([guide](databricks_auth.md#6-renewal-every-two-years)) |
+| PAT (`DATABRICKS_TOKEN` secret) | `deploy.yml`; `refresh.yml` until the service principal exists | ≤ 730 days in this workspace | Generate a new token, update the secret, revoke the old one ([guide](databricks_auth.md#c-a-personal-access-token-with-the-maximum-lifetime-for-deploys-or-as-a-fallback)) |
+| PAT in the Airflow connection `databricks_default` | the local / compose Airflow | as created | Rotate in the workspace, then update `AIRFLOW_CONN_DATABRICKS_DEFAULT` |
+| `GITHUB_TOKEN` | issues, keep-alive | per run | Automatic |
+| Kaggle `KGAT_` token | only `FD_SEED_SOURCE=kaggle` | as created | Not needed by default: the CC0 seed is committed (`seed/`) |
+
+The refresh's `credential health` job fails 14 days before a PAT or recorded secret expiry and opens an issue.
+Set the variable `DATABRICKS_TOKEN_ID` to pin the exact PAT being checked.
 
 ## Resetting a dev environment
 
