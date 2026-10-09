@@ -44,6 +44,10 @@ resources:
               - "{{job.parameters.run_date}}"
               - --job-run-id
               - "{{job.run_id}}"
+              - --gold-schema
+              - ${resources.schemas.gold.name}
+              - --results-schema
+              - ${resources.schemas.ops.name}
       environments:
         - environment_key: default
           spec:

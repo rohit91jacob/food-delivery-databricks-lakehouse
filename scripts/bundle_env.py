@@ -21,6 +21,7 @@ def main(target: str) -> int:
     schema = res["schemas"]["fooddelivery"]
     print(f"FD_CATALOG={schema['catalog_name']}")
     print(f"FD_SCHEMA={schema['name']}")
+    print(f"FD_GOLD_SCHEMA={res['schemas']['gold']['name']}")
     print(f"FD_VOLUME={res['volumes']['landing']['name']}")
     print(f"FD_DATABRICKS_JOB_NAME={res['jobs']['fooddelivery_daily']['name']}")
     return 0

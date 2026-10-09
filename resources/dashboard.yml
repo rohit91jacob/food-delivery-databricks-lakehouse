@@ -7,4 +7,4 @@ resources:
       warehouse_id: ${var.warehouse_id}
       # dataset queries use unqualified table names; these set their default catalog/schema
       dataset_catalog: ${var.catalog}
-      dataset_schema: ${resources.schemas.fooddelivery.name}
+      dataset_schema: ${resources.schemas.gold.name}

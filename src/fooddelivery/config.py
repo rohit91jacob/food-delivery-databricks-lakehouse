@@ -84,6 +84,7 @@ class LakehouseTarget:
 
     catalog: str = "workspace"
     schema: str = "fooddelivery"
+    gold_schema: str = ""  # defaults to <schema>_gold
     volume: str = "landing"
     job_name: str = "fooddelivery_daily"
     warehouse_name: str = "Serverless Starter Warehouse"
@@ -91,6 +92,9 @@ class LakehouseTarget:
     def __post_init__(self) -> None:
         validate_identifier(self.catalog, "FD_CATALOG")
         validate_identifier(self.schema, "FD_SCHEMA")
+        if not self.gold_schema:
+            object.__setattr__(self, "gold_schema", f"{self.schema}_gold")
+        validate_identifier(self.gold_schema, "FD_GOLD_SCHEMA")
         validate_identifier(self.volume, "FD_VOLUME")
 
     @property
@@ -101,6 +105,10 @@ class LakehouseTarget:
         validate_identifier(name, "table name")
         return f"`{self.catalog}`.`{self.schema}`.`{name}`"
 
+    def gold_table(self, name: str) -> str:
+        validate_identifier(name, "table name")
+        return f"`{self.catalog}`.`{self.gold_schema}`.`{name}`"
+
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> LakehouseTarget:
         env = os.environ if env is None else env
@@ -108,6 +116,7 @@ class LakehouseTarget:
         return cls(
             catalog=_get(env, "FD_CATALOG", d.catalog),
             schema=_get(env, "FD_SCHEMA", d.schema),
+            gold_schema=_get(env, "FD_GOLD_SCHEMA", ""),
             volume=_get(env, "FD_VOLUME", d.volume),
             job_name=_get(env, "FD_DATABRICKS_JOB_NAME", d.job_name),
             warehouse_name=_get(env, "FD_SQL_WAREHOUSE_NAME", d.warehouse_name),

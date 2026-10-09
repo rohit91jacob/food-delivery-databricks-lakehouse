@@ -68,6 +68,10 @@ class SilverSpec:
     source: str | None = None  # bronze table to read; defaults to bronze_<entity>
     comment: str = ""
     except_cols: tuple[str, ...] | None = None  # columns not carried into silver
+    # Keep rejected rows in quarantine_<entity>. Only for feeds where rejects are expected and
+    # investigated: Free Edition caps a schema at 100 tables, and every streaming table and MV
+    # also owns hidden internal tables.
+    quarantine: bool = False
 
     @property
     def bronze_table(self) -> str:
@@ -313,6 +317,7 @@ SPECS: tuple[SilverSpec, ...] = (
             "known_payment_method": _in("payment_method", PAYMENT_METHODS),
         },
         fail={"business_date_present": "business_date IS NOT NULL"},
+        quarantine=True,
         comment="Order headers, de-duplicated on order_id; malformed orders go to quarantine_orders.",
     ),
     SilverSpec(
@@ -339,6 +344,7 @@ SPECS: tuple[SilverSpec, ...] = (
             "known_status": _in("status", ORDER_STATUSES),
         },
         warn={"cancel_has_reason": "status <> 'cancelled' OR reason IS NOT NULL"},
+        quarantine=True,
         comment="Order lifecycle status events, de-duplicated on event_id.",
     ),
     SilverSpec(
@@ -351,6 +357,7 @@ SPECS: tuple[SilverSpec, ...] = (
             "amount_non_negative": "amount IS NOT NULL AND amount >= 0",
             "known_status": _in("status", PAYMENT_STATUSES),
         },
+        quarantine=True,
         comment="Payment attempts and captures.",
     ),
     SilverSpec(
@@ -363,6 +370,7 @@ SPECS: tuple[SilverSpec, ...] = (
             "amount_positive": "amount IS NOT NULL AND amount > 0",
         },
         warn={"known_funding": _in("funded_by", ("platform", "restaurant"))},
+        quarantine=True,
         comment="Refunds (cancellations, late deliveries, missing/damaged items).",
     ),
     SilverSpec(

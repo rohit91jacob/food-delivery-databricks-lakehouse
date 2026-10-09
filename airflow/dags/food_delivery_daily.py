@@ -135,7 +135,7 @@ def food_delivery_daily():
     def build_reconciliation_sql(batch: dict) -> str:
         from fooddelivery.quality.reconcile import build_reconciliation_sql as build
 
-        return build(batch["manifests"], TARGET.table("gold_daily_kpis"), batch["business_date"])
+        return build(batch["manifests"], TARGET.gold_table("gold_daily_kpis"), batch["business_date"])
 
     @task
     def publish_summary(batch: dict, upload: dict) -> dict:

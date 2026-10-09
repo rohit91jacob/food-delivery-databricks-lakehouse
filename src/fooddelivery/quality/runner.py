@@ -38,11 +38,17 @@ class CheckResult:
     job_run_id: str
 
 
-def qualified_tables(catalog: str, schema: str, *, quote: bool = True) -> dict[str, str]:
+GOLD_TABLES = ("fct_orders", "fct_order_items", "gold_daily_kpis")
+
+
+def qualified_tables(
+    catalog: str, schema: str, gold_schema: str | None = None, *, quote: bool = True
+) -> dict[str, str]:
     validate_identifier(catalog, "catalog")
     validate_identifier(schema, "schema")
+    gold_schema = validate_identifier(gold_schema or schema, "gold schema")
     q = (lambda x: f"`{x}`") if quote else (lambda x: x)
-    return {t: f"{q(catalog)}.{q(schema)}.{q(t)}" for t in TABLES}
+    return {t: f"{q(catalog)}.{q(gold_schema if t in GOLD_TABLES else schema)}.{q(t)}" for t in TABLES}
 
 
 def run_checks(
@@ -94,15 +100,18 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run-date", required=True, type=date.fromisoformat)
     p.add_argument("--job-run-id", default="")
     p.add_argument("--results-table", default="dq_results")
+    p.add_argument("--gold-schema", default=None, help="schema of fct_*/gold_* (default: --schema)")
+    p.add_argument("--results-schema", default=None, help="schema for dq_results (default: --schema)")
     args = p.parse_args(argv)
 
     from pyspark.sql import SparkSession
 
     spark = SparkSession.builder.getOrCreate()
-    tables = qualified_tables(args.catalog, args.schema)
+    tables = qualified_tables(args.catalog, args.schema, args.gold_schema)
     results = run_checks(spark, tables, args.run_date, job_run_id=args.job_run_id)
+    results_schema = validate_identifier(args.results_schema or args.schema, "results schema")
     validate_identifier(args.results_table, "results table")
-    store_results(spark, f"`{args.catalog}`.`{args.schema}`.`{args.results_table}`", results)
+    store_results(spark, f"`{args.catalog}`.`{results_schema}`.`{args.results_table}`", results)
     failures = failed_errors(results)
     summary = {
         "run_date": args.run_date.isoformat(),

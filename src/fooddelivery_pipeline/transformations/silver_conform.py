@@ -3,7 +3,7 @@
 For each spec in ``fooddelivery.transforms.silver.SPECS``:
 
 * ``v_<entity>_conformed``: temporary view with the expectations (warn / drop / fail)
-* ``quarantine_<entity>``: rows that broke a drop rule, with the names of the failed rules
+* ``quarantine_<entity>``: rows that broke a drop rule, with the failed rule names (feeds with ``quarantine=True``)
 * ``silver_<entity>``: streaming table maintained by ``create_auto_cdc_flow``, SCD1 (dedupe and
   upsert by key) or SCD2 (history on tracked columns, for restaurants and menu prices)
 """
@@ -29,7 +29,7 @@ def define_silver(spec: SilverSpec) -> None:
         view = dp.expect_all(spec.warn)(view)
     dp.temporary_view(name=view_name, comment=f"Typed, validated {spec.entity} feed.")(view)
 
-    if spec.drop and spec.entity != "order_items":  # order lines come from already-validated orders
+    if spec.drop and spec.quarantine:
 
         @dp.table(
             name=f"quarantine_{spec.entity}",

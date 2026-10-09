@@ -7,6 +7,16 @@ resources:
       name: ${var.schema}
       comment: Food-delivery lakehouse (bronze_*, silver_*, quarantine_*, fct_*, gold_*), managed by the fooddelivery bundle.
 
+    gold:
+      catalog_name: ${var.catalog}
+      name: ${var.schema}_gold
+      comment: Food-delivery gold layer (fct_*, gold_*), published by the fooddelivery_lakehouse pipeline.
+
+    ops:
+      catalog_name: ${var.catalog}
+      name: ${var.schema}_ops
+      comment: Operational tables for the food-delivery lakehouse (dq_results), kept apart from the pipeline schema because Free Edition allows 100 tables per schema.
+
   volumes:
     landing:
       catalog_name: ${var.catalog}

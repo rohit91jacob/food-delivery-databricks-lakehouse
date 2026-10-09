@@ -98,7 +98,7 @@ def cmd_reconcile_sql(args) -> dict:
 
     target = LakehouseTarget.from_env()
     manifests = read_manifest(Paths.from_env().landing, args.date.isoformat())
-    return {"sql": build_reconciliation_sql(manifests, target.table("gold_daily_kpis"), args.date.isoformat())}
+    return {"sql": build_reconciliation_sql(manifests, target.gold_table("gold_daily_kpis"), args.date.isoformat())}
 
 
 def main(argv: list[str] | None = None) -> int:

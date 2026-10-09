@@ -70,7 +70,8 @@ def test_generator_config_rejects_bad_values(env):
 def test_lakehouse_target_quotes_and_validates():
     t = LakehouseTarget.from_env({"FD_CATALOG": "workspace", "FD_SCHEMA": "dev_me_fooddelivery"})
     assert t.volume_path == "/Volumes/workspace/dev_me_fooddelivery/landing"
-    assert t.table("gold_daily_kpis") == "`workspace`.`dev_me_fooddelivery`.`gold_daily_kpis`"
+    assert t.table("silver_orders") == "`workspace`.`dev_me_fooddelivery`.`silver_orders`"
+    assert t.gold_table("gold_daily_kpis") == "`workspace`.`dev_me_fooddelivery_gold`.`gold_daily_kpis`"
     with pytest.raises(ValueError):
         LakehouseTarget(schema="x; DROP TABLE y")
     with pytest.raises(ValueError):

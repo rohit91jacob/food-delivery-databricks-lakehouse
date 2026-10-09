@@ -22,7 +22,13 @@ def test_pipeline_defines_the_expected_datasets(emulated):
     for entity in ("restaurants", "menu_items", "orders", "order_events", "rider_locations", "manifests"):
         assert ds[f"bronze_{entity}"].kind == "table"
         assert ds[f"silver_{entity}"].kind == "streaming_table"
-        assert ds[f"quarantine_{entity}"].kind == "table"
+    assert {n for n in ds if n.startswith("quarantine_")} == {
+        "quarantine_orders",
+        "quarantine_order_events",
+        "quarantine_payments",
+        "quarantine_refunds",
+    }
+    assert len(ds) - sum(d.kind == "temporary_view" for d in ds.values()) <= 50  # Free Edition: 100 tables/schema
     assert ds["fct_orders"].kind == "materialized_view"
     assert sum(1 for n in ds if n.startswith("gold_")) == 10
     flows = emulated.registry.flows
