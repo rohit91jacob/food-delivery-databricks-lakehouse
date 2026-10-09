@@ -15,9 +15,10 @@ lifecycle events, rider dispatch and GPS pings, payments, refunds, ratings, prom
 writes a **ground-truth manifest** alongside the data, and the platform proves that every gold metric matches
 it **exactly**, every day.
 
-> **Status.** Everything below the Databricks line is built and verified locally and in CI. The bundle is
-> schema-validated, but it has **not been deployed to a workspace yet**: that step is waiting on workspace
-> credentials (see [Known limitations](#known-limitations)).
+> **Status.** The pipeline is deployed to a Databricks Free Edition workspace (dev target) and runs end to end
+> from Airflow. For business dates 2026-09-01 to 2026-09-03, gold matches the generator manifest **exactly**: all
+> 26 metrics x 5 cities, checked both by the job's DQ gate and by Airflow's independent reconciliation. See
+> [Live verification](#live-verification-databricks-free-edition).
 
 ---
 
@@ -53,7 +54,7 @@ flowchart LR
 | Simulator | `src/fooddelivery/generator/` | 14 raw feeds plus a manifest per business date. Byte-for-byte reproducible; injects duplicates and corrupt rows on purpose |
 | Landing sync | `src/fooddelivery/landing/uploader.py` | Files API upload to a UC volume. Skips unchanged files, prunes stale versions, commit-marker index |
 | Lakeflow pipeline | `src/fooddelivery_pipeline/transformations/` | Bronze (Auto Loader) → silver (expectations, quarantine, AUTO CDC SCD1/SCD2) → gold (12 materialized views) |
-| Shared logic | `src/fooddelivery/transforms/` | Schemas, rules and transformations, installed into the pipeline with `--editable ${workspace.file_path}` |
+| Shared logic | `src/fooddelivery/transforms/` | Schemas, rules and transformations, importable by the pipeline because its `root_path` is `src/` (on `sys.path`) |
 | DQ gate | `src/fooddelivery/quality/` | 13 checks (`fd-dq` job task → `dq_results`) plus independent Airflow reconciliation SQL |
 | Bundle (IaC) | `databricks.yml`, `resources/*.yml` | Schema, volume, pipeline, job, dashboard; `dev`/`prod` targets |
 | Orchestration | `airflow/` | DAG, image, docker-compose (LocalExecutor) |
@@ -85,7 +86,8 @@ Why this dataset, and which ones were rejected: [ADR 0006](docs/adr/0006-kaggle-
 
 ## Data model
 
-Layers: landing (volume) → `bronze_*` → `quarantine_*` / `silver_*` → `fct_*` → `gold_*`, plus `dq_results`.
+Layers: landing (volume) → `bronze_*` → `quarantine_*` / `silver_*` → `fct_*` → `gold_*`, plus `dq_results`. They are spread over three
+schemas (`fooddelivery`, `fooddelivery_gold`, `fooddelivery_ops`) to stay under Free Edition's 100-tables-per-schema limit.
 All are reconciled on **`business_date`** (order placement date, IST).
 
 | Table | Grain / keys |
@@ -132,7 +134,7 @@ fct_order_items 17506, gold_daily_kpis 15 (5 cities x 3 days)
 The same seed, config and date always produce identical files. Rerunning `fd generate` for a date rewrites the
 same bytes.
 
-### 2. Deploy to Databricks Free Edition (not yet run against a workspace; see the status note above)
+### 2. Deploy to Databricks Free Edition (verified against a real workspace, dev target)
 
 ```bash
 export DATABRICKS_HOST=https://<workspace>.cloud.databricks.com
@@ -186,6 +188,7 @@ Every variable is in [`.env.example`](.env.example) (CLI and tests) and [`airflo
 | `FD_KAGGLE_TOKEN_FILE` | empty | File holding a `KGAT_` token (containers) |
 | `FD_DATA_DIR` | `data` | Local landing zone, seed and downloads |
 | `FD_CATALOG` / `FD_SCHEMA` / `FD_VOLUME` | `workspace` / `fooddelivery` / `landing` | UC target; dev schema is `dev_<user>_fooddelivery` |
+| `FD_GOLD_SCHEMA` | `<FD_SCHEMA>_gold` | Schema of `fct_*` / `gold_*` (the reconciliation target) |
 | `FD_DATABRICKS_JOB_NAME` | `fooddelivery_daily` | dev: `[dev <user>] fooddelivery_daily` |
 | `FD_SQL_WAREHOUSE_NAME` | `Serverless Starter Warehouse` | Warehouse for the Airflow reconciliation |
 | `FD_DATABRICKS_CONN_ID` | `databricks_default` | Airflow connection id |
@@ -256,7 +259,8 @@ Dependabot covers Actions, uv and Docker. pre-commit runs ruff and basic hygiene
 
 - **Generate outside, ingest inside** ([ADR 0001](docs/adr/0001-free-edition-constraints.md)): serverless has
   restricted egress, so Airflow pushes files through the Files API and the workspace never calls the internet.
-- **One schema, prefixed layers.** Simpler grants and bundle management on a single-workspace Free Edition.
+- **Three schemas (raw+silver / gold / ops), prefixed layers.** Free Edition allows 100 tables per schema, and each
+  pipeline dataset also creates a hidden `__materialization_*` table, so a single schema did not fit.
   Dev and prod are separated by the bundle's dev-mode schema prefix.
 - **AUTO CDC everywhere in silver, SCD2 only where history is consumed**
   ([ADR 0003](docs/adr/0003-auto-cdc-and-scd2.md)). Commission and line prices are joined point-in-time.
@@ -267,12 +271,41 @@ Dependabot covers Actions, uv and Docker. pre-commit runs ruff and basic hygiene
 - **Emulator instead of mocks** ([ADR 0004](docs/adr/0004-local-pipeline-emulator.md)). The CI tests execute the
   same pipeline files that Databricks runs.
 
+## Live verification (Databricks Free Edition)
+
+Airflow 3.3.2 `dags test` ran the full DAG (seed → generate → upload → job → reconcile → summary) against the dev
+target (`dev_<user>_fooddelivery`, `_gold`, `_ops`), one business date at a time:
+
+| business_date | bronze orders | silver orders | quarantined | duplicates removed | delivered | GMV (INR) | commission | DQ checks | Airflow reconciliation |
+|---|---|---|---|---|---|---|---|---|---|
+| 2026-09-01 | 2,966 | 2,951 | 7 | 8 | 2,779 | 729,768.15 | 125,563.96 | 13/13 | 5 cities x 26 metrics equal |
+| 2026-09-02 | 3,273 | 3,255 | 6 | 12 | 3,105 | 821,606.62 | 141,608.60 | 13/13 (twice) | equal |
+| 2026-09-03 | 3,301 | 3,289 | 5 | 7 | 3,144 | 871,694.53 | 148,743.48 | 13/13 | equal |
+
+**Rerun of 2026-09-02:**
+- The upload moved 0 bytes (15 files skipped by sha256).
+- The job rerun passed all 13 checks again.
+- Bronze, silver and gold counts were unchanged; bronze still equals silver + quarantine + duplicates, so nothing
+  was re-ingested.
+
+A DAG run takes about 16 minutes, about 9 of which are the serverless pipeline update.
+
+**Where Free Edition behaved differently from the local emulator:**
+1. **`environment.dependencies: --editable ${workspace.file_path}` did not make the package importable.** Every
+   update failed with `ModuleNotFoundError: No module named 'fooddelivery'`. The fix was
+   `root_path: ../src`: the pipeline's root path goes on `sys.path`, so no install is needed.
+2. **100 tables per schema** (`QUOTA_EXCEEDED.UC_RESOURCE_QUOTA_EXCEEDED ... estimated count: 117, limit: 100`).
+   Each pipeline dataset also creates a hidden `__materialization_*` table. The fixes were: gold moved to
+   `<schema>_gold`, `dq_results` moved to `<schema>_ops`, and quarantine tables are kept only for orders,
+   order_events, payments and refunds.
+3. **Removing a dataset does not drop its table.** Orphans keep counting towards the quota (see the runbook).
+4. A failed pipeline update is retried automatically several times inside one job run, which consumes quota.
+   Fix the root cause before re-triggering.
+
 ## Known limitations
 
-- **Not yet deployed to Databricks.** The bundle passes CLI-schema validation and the pipeline sources pass the
-  emulator, but `bundle deploy` and a live pipeline/job/dashboard run have not been executed. They need the
-  workspace host + PAT. The Databricks-only behaviours (Auto Loader incremental state, AUTO CDC on real streams,
-  MV incremental refresh, the `.lvdash.json` rendering) are therefore unverified.
+- Only the **dev** target has run live. The prod target deploys from CI on `main`, but its DAG has not been run.
+- The AI/BI dashboard deployed, but its rendering was not checked visually.
 - Docker Compose has only been verified in GitHub Actions (no Docker on the development machine).
 - The generator is a model, not reality. Behavioural parameters (demand curves, rain by month, prep and travel
   speeds) are documented constants, not fitted.
@@ -281,7 +314,7 @@ Dependabot covers Actions, uv and Docker. pre-commit runs ruff and basic hygiene
 
 ## Roadmap
 
-- Deploy and run the full DAG against the Free Edition workspace; set the CI deploy secrets.
+- Run the scheduled DAG continuously on a hosted Airflow (compose) against prod.
 - File-arrival trigger on the volume instead of Airflow-triggered runs (paid tiers).
 - Streaming file drops (intraday micro-batches) for near-real-time SLA tiles.
 - Unity Catalog metric views / Genie space over `gold_*`.

@@ -11,6 +11,7 @@ Free Edition comes with these limits:
 - **restricted outbound internet** from serverless
 - no custom storage locations
 - no account-level APIs
+- **100 tables per schema** (found on the first real deploy; hidden `__materialization_*` tables count towards it)
 
 ## Decision
 - **Data is produced outside Databricks.** Airflow downloads the Kaggle seed and runs the generator, then pushes
@@ -20,7 +21,9 @@ Free Edition comes with these limits:
   - a Lakeflow Declarative Pipeline (`serverless: true`)
   - a serverless job (`environment_version: 5`, `performance_target: STANDARD`)
   - an AI/BI dashboard on the single warehouse (`lookup: warehouse: Serverless Starter Warehouse`)
-- Managed schema and volume (no `storage_location`). The `workspace` catalog is the default.
+- Managed schemas and volume (no `storage_location`). The `workspace` catalog is the default. Gold publishes to
+  `<schema>_gold` and `dq_results` lives in `<schema>_ops`. Quarantine tables exist only for the four feeds where
+  rejects are expected (orders, order_events, payments, refunds). That keeps every schema well under 100 tables.
 - **Serialized execution.** The job runs with `max_concurrent_runs: 1` and a queue, and the DAG with
   `max_active_runs: 1`. The job has two tasks.
 - dev and prod both live in the single workspace as bundle targets. Dev mode prefixes the schema

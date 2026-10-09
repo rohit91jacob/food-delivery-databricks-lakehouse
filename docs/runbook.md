@@ -65,6 +65,13 @@ fail, wait for the daily reset, then clear the failed task instances (or rerun t
 because the landing files are already uploaded and every step is idempotent. To spend less quota, lower
 `FD_BASE_ORDERS_PER_CITY`, reduce `FD_CITIES`, or raise `FD_GPS_PING_SECONDS`.
 
+## Removing a dataset from the pipeline
+
+Lakeflow does not drop a table when its definition is removed. The table, and its hidden `__materialization_*`
+table, keep counting towards the 100-table limit. After deleting a dataset from the code, drop the orphaned table
+in each target with `DROP TABLE <catalog>.<schema>.<name>`. In dev, `databricks bundle destroy -t dev` followed by
+`deploy` also works.
+
 ## Credentials
 
 - Databricks: a PAT in the Airflow connection `databricks_default` (`AIRFLOW_CONN_DATABRICKS_DEFAULT`), and repo

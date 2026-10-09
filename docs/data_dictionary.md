@@ -1,17 +1,25 @@
 # Data dictionary
 
-All tables live in one Unity Catalog schema per target: `workspace.fooddelivery` in prod, and
-`workspace.dev_<user>_fooddelivery` in dev (the bundle prefixes it). A name prefix marks each table's layer.
+Each target has three Unity Catalog schemas. Dev-mode deploys prefix all three with `dev_<user>_`.
+
+| Schema | Contents |
+|---|---|
+| `workspace.fooddelivery` | landing volume, `bronze_*`, `quarantine_*`, `silver_*` |
+| `workspace.fooddelivery_gold` | `fct_*`, `gold_*` |
+| `workspace.fooddelivery_ops` | `dq_results` |
+
+Why three? Free Edition limits a schema to **100 tables**, and every pipeline dataset also owns a hidden
+`__materialization_*` table. The bronze/silver schema holds about 35 datasets, so about 70 tables.
 **`business_date`** is the order placement date in Asia/Kolkata. Every feed is partitioned and reconciled by it.
 
 | Layer | Prefix | Built by | Mutability |
 |---|---|---|---|
 | Landing | `/Volumes/<cat>/<schema>/landing/<feed>/dt=YYYY-MM-DD/part-00000-v<N>.json.gz` | Airflow (`upload_batch`) | One file per feed/date/generator version |
 | Bronze | `bronze_<feed>` | Auto Loader streaming tables | Append-only, raw, plus `_rescued_data`, `_source_file`, `_ingested_at` |
-| Quarantine | `quarantine_<feed>` | Streaming tables | Rows that broke a drop rule, plus `_failed_rules`, `_quarantined_at` |
+| Quarantine | `quarantine_<feed>` (orders, order_events, payments, refunds) | Streaming tables | Rows that broke a drop rule, plus `_failed_rules`, `_quarantined_at`. Other feeds still drop bad rows; the rows are only counted in the pipeline's expectation metrics |
 | Silver | `silver_<feed>` | `create_auto_cdc_flow` (SCD1 / SCD2) | Typed, validated, de-duplicated |
 | Gold | `fct_*`, `gold_*` | Materialized views | Recomputed (incrementally where possible) |
-| Ops | `dq_results` | Job task `data_quality` (`fd-dq`) | Append-only audit of every check run |
+| Ops | `<schema>_ops.dq_results` | Job task `data_quality` (`fd-dq`) | Append-only audit of every check run |
 
 ## Raw feeds (landing to bronze)
 
