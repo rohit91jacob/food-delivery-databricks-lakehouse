@@ -43,7 +43,7 @@ def test_bundle_paths_exist():
     res = merged()["resources"]
     pipeline = res["pipelines"]["fooddelivery_lakehouse"]
     assert pipeline["serverless"] is True
-    assert (REPO / "resources" / pipeline["root_path"]).resolve().is_dir()
+    assert (REPO / "resources" / pipeline["root_path"] / "fooddelivery").resolve().is_dir()
     assert list((REPO / "src/fooddelivery_pipeline/transformations").glob("*.py"))
     dash = res["dashboards"]["fooddelivery_ops"]
     assert (REPO / "resources" / dash["file_path"]).resolve().is_file()
@@ -61,7 +61,8 @@ def test_dashboard_reads_only_existing_gold_tables():
     dash = json.loads((REPO / "dashboards/food_delivery_ops.lvdash.json").read_text())
     defined = set(
         re.findall(
-            r'name="(gold_\w+|fct_\w+)"', (REPO / "src/fooddelivery_pipeline/transformations/gold_marts.py").read_text()
+            r'name=G\("(gold_\w+|fct_\w+)"\)',
+            (REPO / "src/fooddelivery_pipeline/transformations/gold_marts.py").read_text(),
         )
     )
     names = {d["name"] for d in dash["datasets"]}

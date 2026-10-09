@@ -8,15 +8,15 @@ resources:
       serverless: true   # the only compute type on Free Edition
       channel: CURRENT
       continuous: false  # triggered by the daily job (and so by Airflow)
-      root_path: ../src/fooddelivery_pipeline
+      # root_path is put on sys.path, so the shared `fooddelivery` package (schemas, rules,
+      # transformations) under src/ is importable by the pipeline sources without installing anything
+      root_path: ../src
       libraries:
         - glob:
             include: ../src/fooddelivery_pipeline/transformations/**
-      environment:
-        dependencies:
-          # installs this repo's `fooddelivery` package (schemas, rules, transformations) into the pipeline
-          - --editable ${workspace.file_path}
       configuration:
+        fooddelivery.catalog: ${var.catalog}
+        fooddelivery.gold_schema: ${resources.schemas.gold.name}
         fooddelivery.landing_path: /Volumes/${var.catalog}/${resources.schemas.fooddelivery.name}/${resources.volumes.landing.name}
       notifications:
         - email_recipients:
