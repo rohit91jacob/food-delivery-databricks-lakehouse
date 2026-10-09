@@ -1,7 +1,13 @@
 name: Deploy bundle
 
 # dev on pull requests (same-repo branches only; forks never see secrets), prod on main.
-# Every Databricks step is skipped cleanly until DATABRICKS_HOST and DATABRICKS_TOKEN repo secrets exist.
+# Every Databricks step is skipped cleanly until a host and a credential are configured.
+#
+# Auth (see docs/databricks_auth.md): deploys use the PAT in secret DATABRICKS_TOKEN unless the
+# repo variable FD_DEPLOY_AUTH=service-principal is set. Then they use the same service principal
+# as the scheduled refresh (variable DATABRICKS_CLIENT_ID plus secret DATABRICKS_CLIENT_SECRET).
+# Switching deploy identity is deliberate and opt-in: in dev mode, resource names and the bundle's
+# state location depend on the deploying identity.
 on:
   push:
     branches: [main]
@@ -29,12 +35,14 @@ jobs:
     steps:
       - id: check
         env:
-          HOST: ${{ secrets.DATABRICKS_HOST }}
-          TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          HOST: ${{ vars.DATABRICKS_HOST || secrets.DATABRICKS_HOST }}
+          CREDENTIAL: >-
+            ${{ vars.FD_DEPLOY_AUTH == 'service-principal' && secrets.DATABRICKS_CLIENT_SECRET
+            || secrets.DATABRICKS_TOKEN }}
         run: |
-          if [ -n "$HOST" ] && [ -n "$TOKEN" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"; else
+          if [ -n "$HOST" ] && [ -n "$CREDENTIAL" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"; else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::DATABRICKS_HOST/DATABRICKS_TOKEN secrets not set - skipping bundle validate/deploy"
+            echo "::notice::Databricks host or credential not configured - skipping bundle validate/deploy"
           fi
           if [ "${{ github.event_name }}" = "push" ]; then t=prod
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then t="${{ inputs.target }}"
@@ -50,8 +58,13 @@ jobs:
       group: deploy-${{ needs.preflight.outputs.target }}
       cancel-in-progress: false
     env:
-      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
-      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST || secrets.DATABRICKS_HOST }}
+      # Exactly one credential is exported; the CLI refuses ambiguous auth.
+      DATABRICKS_TOKEN: ${{ vars.FD_DEPLOY_AUTH != 'service-principal' && secrets.DATABRICKS_TOKEN || '' }}
+      DATABRICKS_CLIENT_ID: ${{ vars.FD_DEPLOY_AUTH == 'service-principal' && vars.DATABRICKS_CLIENT_ID || '' }}
+      DATABRICKS_CLIENT_SECRET: >-
+        ${{ vars.FD_DEPLOY_AUTH == 'service-principal' && secrets.DATABRICKS_CLIENT_SECRET || '' }}
+      DATABRICKS_AUTH_TYPE: ${{ vars.FD_DEPLOY_AUTH == 'service-principal' && 'oauth-m2m' || 'pat' }}
       TARGET: ${{ needs.preflight.outputs.target }}
     steps:
       - uses: actions/checkout@v7

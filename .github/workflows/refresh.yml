@@ -1,0 +1,164 @@
+name: Scheduled refresh
+
+# Nightly: process the next synthetic business date on the dev target. This is the hosted twin of
+# the Airflow DAG: generate -> upload to the UC volume -> run the Lakeflow job -> reconcile gold
+# with the manifest on the SQL warehouse. Every step is idempotent per business date.
+#
+# Free Edition quota: one date takes about 16 minutes of serverless compute (about 9 of them the
+# pipeline refresh). Going over the daily fair-use quota shuts compute down until the next day.
+# To refresh less often, edit the cron below (e.g. "0 1 * * 1,4" for twice a week).
+#
+# Auth, in order of preference. See docs/databricks_auth.md.
+#   1. OAuth M2M: repo variable DATABRICKS_CLIENT_ID plus secret DATABRICKS_CLIENT_SECRET
+#   2. GitHub OIDC federation: variable DATABRICKS_CLIENT_ID only (needs account-level federation
+#      policies, which Free Edition does not have)
+#   3. Personal access token: secret DATABRICKS_TOKEN
+# The host comes from variable DATABRICKS_HOST, falling back to the secret of the same name.
+
+on:
+  schedule:
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+    inputs:
+      business_date:
+        description: Business date to (re)process, YYYY-MM-DD. Empty means the next unprocessed date.
+        required: false
+        default: ""
+      warn_days:
+        description: Fail when the credential expires within this many days
+        required: false
+        default: "14"
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write # only used by GitHub OIDC federation
+
+concurrency:
+  group: refresh-dev # Free Edition runs one pipeline update at a time
+  cancel-in-progress: false
+
+env:
+  FD_LOG_LEVEL: WARNING
+  FD_DATA_DIR: data
+  FD_CATALOG: ${{ vars.FD_CATALOG || 'workspace' }}
+  FD_SCHEMA: ${{ vars.FD_SCHEMA || 'dev_rohit91jacob_fooddelivery' }}
+  FD_GOLD_SCHEMA: ${{ vars.FD_GOLD_SCHEMA || 'dev_rohit91jacob_fooddelivery_gold' }}
+  FD_DATABRICKS_JOB_NAME: ${{ vars.FD_DATABRICKS_JOB_NAME || '[dev rohit91jacob] fooddelivery_daily' }}
+  DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST || secrets.DATABRICKS_HOST }}
+  DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_CLIENT_ID }}
+  # Only one credential is exported: the SDK refuses to start when several are set.
+  DATABRICKS_CLIENT_SECRET: ${{ vars.DATABRICKS_CLIENT_ID != '' && secrets.DATABRICKS_CLIENT_SECRET || '' }}
+  DATABRICKS_TOKEN: ${{ vars.DATABRICKS_CLIENT_ID == '' && secrets.DATABRICKS_TOKEN || '' }}
+  DATABRICKS_AUTH_TYPE: >-
+    ${{ vars.DATABRICKS_CLIENT_ID == '' && 'pat'
+    || (secrets.DATABRICKS_CLIENT_SECRET != '' && 'oauth-m2m' || 'github-oidc') }}
+  DATABRICKS_TOKEN_ID: ${{ vars.DATABRICKS_TOKEN_ID }}
+  DATABRICKS_CLIENT_SECRET_EXPIRES: ${{ vars.DATABRICKS_CLIENT_SECRET_EXPIRES }}
+  WARN_DAYS: ${{ inputs.warn_days || vars.FD_CREDENTIAL_WARN_DAYS || '14' }}
+
+jobs:
+  credentials:
+    name: credential health
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked --extra databricks --no-default-groups
+      - name: Check the Databricks credential
+        id: check
+        run: |
+          set -o pipefail
+          uv run --no-sync fd check-credentials --warn-days "$WARN_DAYS" 2>&1 | tee "$RUNNER_TEMP/credentials.json"
+      - name: Open or update the credential issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          details=$(cat "$RUNNER_TEMP/credentials.json" 2>/dev/null || echo '{"message": "authentication failed, see the run log"}')
+          scripts/gh_issue.sh "Databricks credential needs attention" "$(cat <<EOF
+          The scheduled refresh stopped before touching any data, because the Databricks credential
+          (auth mode \`$DATABRICKS_AUTH_TYPE\`) is missing, rejected, or expires within $WARN_DAYS days.
+
+          \`\`\`json
+          $details
+          \`\`\`
+
+          **Renew it:** follow $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/main/docs/databricks_auth.md, then
+          re-run this workflow. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          EOF
+          )"
+
+  refresh:
+    name: process next business date
+    needs: credentials
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked --extra databricks --no-default-groups
+      - name: Install the committed restaurant seed
+        run: uv run --no-sync fd seed
+      - name: Pick the business date
+        id: date
+        env:
+          OVERRIDE: ${{ inputs.business_date }}
+        run: |
+          set -o pipefail
+          uv run --no-sync fd next-date --date "$OVERRIDE" | tee "$RUNNER_TEMP/next.json"
+          d=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['business_date'] or '')" "$RUNNER_TEMP/next.json")
+          echo "business_date=$d" >> "$GITHUB_OUTPUT"
+          if [ -z "$d" ]; then echo "::notice::Gold is caught up with today; nothing to process."; fi
+      - name: Generate the batch
+        if: steps.date.outputs.business_date != ''
+        run: uv run --no-sync fd generate --date "${{ steps.date.outputs.business_date }}"
+      - name: Upload to the landing volume
+        if: steps.date.outputs.business_date != ''
+        run: uv run --no-sync fd upload --date "${{ steps.date.outputs.business_date }}"
+      - name: Run the Lakeflow job
+        if: steps.date.outputs.business_date != ''
+        run: |
+          set -o pipefail
+          uv run --no-sync fd run-job --date "${{ steps.date.outputs.business_date }}" | tee "$RUNNER_TEMP/job.json"
+      - name: Reconcile gold with the manifest
+        if: steps.date.outputs.business_date != ''
+        run: |
+          set -o pipefail
+          uv run --no-sync fd reconcile --date "${{ steps.date.outputs.business_date }}" | tee "$RUNNER_TEMP/reconcile.json"
+      - name: Summary
+        if: steps.date.outputs.business_date != ''
+        run: |
+          python3 - "$RUNNER_TEMP" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json, pathlib, sys
+          tmp = pathlib.Path(sys.argv[1])
+          job = json.loads((tmp / "job.json").read_text())
+          rec = json.loads((tmp / "reconcile.json").read_text())
+          print(f"### Business date {rec['business_date']}")
+          print(f"- Lakeflow job: **{job['result_state']}** in {job['minutes']} min ([run]({job['run_page_url']}))")
+          print(f"- Reconciliation: {rec['result']}")
+          PY
+
+  alert:
+    name: alert on failure
+    needs: [credentials, refresh]
+    if: failure() && needs.credentials.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          scripts/gh_issue.sh "Scheduled refresh failed" "$(cat <<EOF
+          The nightly refresh failed after the credential check passed.
+          Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+
+          Common causes and fixes: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/main/docs/runbook.md#scheduled-refresh
+          (daily compute quota, a cold warehouse, a pipeline error). Every step is idempotent:
+          once fixed, re-run the workflow, optionally with the same \`business_date\`.
+          EOF
+          )"

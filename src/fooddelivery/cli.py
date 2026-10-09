@@ -9,6 +9,7 @@ from datetime import date, timedelta
 
 from fooddelivery import logs
 from fooddelivery.config import GeneratorConfig, LakehouseTarget, Paths
+from fooddelivery.refresh import RefreshError
 
 
 def _dates(start: date, days: int) -> list[date]:
@@ -101,13 +102,59 @@ def cmd_reconcile_sql(args) -> dict:
     return {"sql": build_reconciliation_sql(manifests, target.gold_table("gold_daily_kpis"), args.date.isoformat())}
 
 
+def cmd_check_credentials(args) -> dict:
+    from fooddelivery.landing.uploader import workspace_client
+    from fooddelivery.refresh import check_credentials
+
+    report = check_credentials(workspace_client(), warn_days=args.warn_days)
+    if not report.ok:
+        print(json.dumps(report.as_dict(), indent=2))
+        raise SystemExit(2)
+    return report.as_dict()
+
+
+def cmd_next_date(args) -> dict:
+    from fooddelivery.landing.uploader import workspace_client
+    from fooddelivery.refresh import latest_gold_date, next_business_date, warehouse_id
+
+    target = LakehouseTarget.from_env()
+    latest = None
+    if args.date is None:
+        w = workspace_client()
+        latest = latest_gold_date(w, warehouse_id(w, target.warehouse_name), target.gold_table("gold_daily_kpis"))
+    nxt = next_business_date(latest, GeneratorConfig.from_env().start_date, override=args.date)
+    return {"latest_in_gold": latest, "business_date": nxt.isoformat() if nxt else None}
+
+
+def cmd_run_job(args) -> dict:
+    from fooddelivery.landing.uploader import workspace_client
+    from fooddelivery.refresh import run_job
+
+    target = LakehouseTarget.from_env()
+    return run_job(workspace_client(), target.job_name, args.date.isoformat(), timeout_s=args.timeout_minutes * 60)
+
+
+def cmd_reconcile(args) -> dict:
+    from fooddelivery.generator.writer import read_manifest
+    from fooddelivery.landing.uploader import workspace_client
+    from fooddelivery.quality.reconcile import build_reconciliation_sql
+    from fooddelivery.refresh import execute_sql, warehouse_id
+
+    target = LakehouseTarget.from_env()
+    manifests = read_manifest(Paths.from_env().landing, args.date.isoformat())
+    sql = build_reconciliation_sql(manifests, target.gold_table("gold_daily_kpis"), args.date.isoformat())
+    w = workspace_client()
+    rows = execute_sql(w, warehouse_id(w, target.warehouse_name), sql)
+    return {"business_date": args.date.isoformat(), "result": rows[0][0] if rows else None}
+
+
 def main(argv: list[str] | None = None) -> int:
     logs.configure()
     p = argparse.ArgumentParser(prog="fd", description="Food-delivery lakehouse operator CLI")
     sub = p.add_subparsers(dest="command", required=True)
 
-    s = sub.add_parser("seed", help="build the restaurant seed (Kaggle or synthetic)")
-    s.add_argument("--source", choices=("kaggle", "synthetic"), default=None)
+    s = sub.add_parser("seed", help="install the restaurant seed (committed copy, Kaggle or synthetic)")
+    s.add_argument("--source", choices=("committed", "kaggle", "synthetic"), default=None)
     s.add_argument("--force", action="store_true", help="rebuild even if a seed exists")
     s.set_defaults(func=cmd_seed)
 
@@ -132,8 +179,29 @@ def main(argv: list[str] | None = None) -> int:
     q.add_argument("--date", type=date.fromisoformat, required=True)
     q.set_defaults(func=cmd_reconcile_sql)
 
+    c = sub.add_parser("check-credentials", help="verify Databricks auth works and is not about to expire")
+    c.add_argument("--warn-days", type=int, default=14)
+    c.set_defaults(func=cmd_check_credentials)
+
+    n = sub.add_parser("next-date", help="next business date to process (latest in gold + 1)")
+    n.add_argument("--date", type=lambda v: date.fromisoformat(v) if v else None, default=None, help="override")
+    n.set_defaults(func=cmd_next_date)
+
+    j = sub.add_parser("run-job", help="run the deployed Lakeflow job for a date and wait for it")
+    j.add_argument("--date", type=date.fromisoformat, required=True)
+    j.add_argument("--timeout-minutes", type=int, default=90)
+    j.set_defaults(func=cmd_run_job)
+
+    k = sub.add_parser("reconcile", help="reconcile gold with the local manifest on the SQL warehouse")
+    k.add_argument("--date", type=date.fromisoformat, required=True)
+    k.set_defaults(func=cmd_reconcile)
+
     args = p.parse_args(argv)
-    result = args.func(args)
+    try:
+        result = args.func(args)
+    except RefreshError as exc:
+        print(json.dumps({"error": str(exc)}), file=sys.stderr)
+        return 1
     print(json.dumps(result, indent=2, default=str))
     return 0
 
