@@ -15,7 +15,7 @@ dependencies = []
 
 [project.optional-dependencies]
 seed = ["kaggle>=2.2,<3"]
-databricks = ["databricks-sdk>=0.60,<1"]
+databricks = ["databricks-sdk<1,>=0.60"]
 
 [project.scripts]
 fd = "fooddelivery.cli:main"
@@ -24,20 +24,20 @@ fd-dq = "fooddelivery.quality.runner:main"
 [dependency-groups]
 dev = [
     "pytest==9.1.1",
-    "ruff==0.16.10",
+    "ruff==0.17.0",
     "pyyaml==6.0.3",
     "jsonschema==4.26.0",
     "regex==2026.9.29",
 ]
 spark = [
-    "pyspark==4.0.1",
-    "delta-spark==4.0.1",
+    "pyspark==4.2.0",
+    "delta-spark==4.4.1",
 ]
 airflow = [
     "apache-airflow==3.3.2",
-    "apache-airflow-providers-databricks==7.20.0",
+    "apache-airflow-providers-databricks==7.21.0",
     "kaggle==2.2.4",
-    "databricks-sdk==0.148.0",
+    "databricks-sdk==0.151.0",
 ]
 
 [build-system]
