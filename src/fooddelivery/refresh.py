@@ -232,14 +232,18 @@ def warehouse_id(w, name: str) -> str:
 
 def execute_sql(w, warehouse: str, sql: str, *, timeout_s: int = 900, poll_s: float = 5.0) -> list[list]:
     """Run one statement on the SQL warehouse and return its rows. A FAILED statement raises RefreshError."""
+    from databricks.sdk.errors import BadRequest
     from databricks.sdk.service.sql import ExecuteStatementRequestOnWaitTimeout
 
-    resp = w.statement_execution.execute_statement(
-        statement=sql,
-        warehouse_id=warehouse,
-        wait_timeout="30s",
-        on_wait_timeout=ExecuteStatementRequestOnWaitTimeout.CONTINUE,
-    )
+    try:
+        resp = w.statement_execution.execute_statement(
+            statement=sql,
+            warehouse_id=warehouse,
+            wait_timeout="30s",
+            on_wait_timeout=ExecuteStatementRequestOnWaitTimeout.CONTINUE,
+        )
+    except BadRequest as exc:
+        raise RefreshError(_explain_rejected_statement(w, warehouse, exc)) from exc
     deadline = time.monotonic() + timeout_s
     while resp.status.state.value not in TERMINAL_STATEMENT:
         if time.monotonic() > deadline:
@@ -251,6 +255,25 @@ def execute_sql(w, warehouse: str, sql: str, *, timeout_s: int = 900, poll_s: fl
         err = resp.status.error.message if resp.status.error else resp.status.state.value
         raise RefreshError(f"SQL statement {resp.status.state.value}: {err}")
     return (resp.result.data_array or []) if resp.result else []
+
+
+def _explain_rejected_statement(w, warehouse: str, exc: Exception) -> str:
+    """Turn the warehouse's opaque 'request could not be processed' into an actionable message.
+
+    Free Edition stops compute for workspaces it considers inactive; a stopped warehouse then
+    rejects statements, and starting it fails with denyReason INACTIVE. API tokens don't count as
+    activity, so only a person signing in to the workspace UI brings it back."""
+    try:
+        w.warehouses.start(warehouse)
+    except Exception as start_exc:
+        if "INACTIVE" in str(start_exc) or "DENY_NEW_AND_EXISTING_RESOURCES" in str(start_exc):
+            return (
+                "Databricks deactivated this Free Edition workspace for inactivity, so the SQL warehouse "
+                "can't start. Sign in to the workspace UI once to reactivate it, then re-run. "
+                f"(statement error: {exc}; start error: {start_exc})"
+            )
+        return f"SQL warehouse rejected the statement and could not be started: {exc}; {start_exc}"
+    return f"SQL warehouse rejected the statement ({exc}); it was asked to start, so a re-run may succeed."
 
 
 def latest_gold_date(w, warehouse: str, kpis_table: str) -> date | None:

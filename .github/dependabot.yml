@@ -11,6 +11,11 @@ updates:
     groups:
       python:
         patterns: ["*"]
+    ignore:
+      # delta-spark 4.4.x requires pyspark <= 4.2; bumping pyspark alone makes the lock unsolvable.
+      # Drop this once a delta-spark release supports the newer pyspark.
+      - dependency-name: pyspark
+        versions: [">=4.3"]
   - package-ecosystem: docker
     directory: /airflow
     schedule:
