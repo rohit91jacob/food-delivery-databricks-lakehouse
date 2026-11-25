@@ -173,6 +173,23 @@ A manually triggered run (or `airflow tasks test <dag> <task> <logical_date>`) p
 IST day before the logical date. For example, logical date `2026-09-02T00:00:00+05:30` processes business date
 2026-09-01.
 
+## Genie agent (MLflow traced, evaluated, monitored)
+
+`fd agent ...` builds a **Genie space** over the gold marts from code and wraps it in an **MLflow
+`ResponsesAgent`**. Every question produces a trace: the Genie call, the generated SQL and the
+result rows. An evaluation set whose answers come from the **generator manifest** scores the agent
+with `mlflow.genai.evaluate`, and registered scorers monitor live traces. The first live run scored
+**100% exact numeric accuracy** on 25 KPI questions. See [docs/agent.md](docs/agent.md) and
+[ADR 0008](docs/adr/0008-genie-agent-mlflow.md).
+
+```bash
+uv sync --group dev --group agent --extra databricks
+uv run fd agent space --profile genie                    # prints FD_GENIE_SPACE_ID
+uv run fd agent ask --profile genie "What was GMV by city on the latest business date?"
+uv run fd agent eval --profile genie --start 2026-09-01 --end 2026-09-17
+uv run fd agent monitor --profile genie                  # needs an all-APIs token
+```
+
 ## Configuration
 
 Every variable is in [`.env.example`](.env.example) (CLI and tests) and [`airflow/.env.example`](airflow/.env.example) (compose).
