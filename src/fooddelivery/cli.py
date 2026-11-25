@@ -217,6 +217,10 @@ def cmd_agent_deploy(args) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        # MLflow prints emoji run links; a Windows cp1252 console would raise UnicodeEncodeError
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     logs.configure()
     p = argparse.ArgumentParser(prog="fd", description="Food-delivery lakehouse operator CLI")
     sub = p.add_subparsers(dest="command", required=True)

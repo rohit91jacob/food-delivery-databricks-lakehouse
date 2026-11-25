@@ -89,10 +89,34 @@ Friday?"). Genie correctly declined it, but the scorers counted the refusal as a
 `genie_answered` and `sql_generated` now honour `expect_refusal` in the eval set. The
 relevance judge still marks a correct refusal as irrelevant, which is a known trait of that judge.
 
+### Production monitoring (verified)
+
+`fd agent monitor` registered and started all six scorers on experiment `2895128512865967`. A live
+question ("Which city had the most late deliveries on 2026-09-10?", answer Mumbai, 135, which matches
+the manifest) received all six assessments within minutes, without any manual step:
+`genie_answered` True, `sql_generated` True, `genie_latency_s` 14.85, `safety` yes,
+`relevance_to_query` yes, `answer_guidelines` yes.
+
+### Deployment (verified)
+
+`fd agent deploy` registered `workspace.dev_rohit91jacob_fooddelivery_ops.genie_agent` (v4) and
+served it as the Agent Framework endpoint `agents_workspace-dev_rohit91jacob_fooddelivery_ops-genie_agent`
+(scale to zero), with a Review App for human feedback. The endpoint reached READY and answered "How
+many orders were placed across all cities on 2026-09-08?" with 3,055, which matches the manifest.
+Anonymous requests get 401.
+
+Two traps found on the way, both handled in code:
+- **Models-from-code logged on Windows don't load on Linux serving.** MLmodel records the absolute
+  `C:\...` path, and the container's POSIX `basename` can't split it. On Windows,
+  `ops._log_from_windows` saves the model, rewrites `model_code_path` to `genie_agent.py`, then
+  logs and registers it.
+- **`ModelConfig` must be read at import time.** MLflow exposes the logged config only while it
+  imports the model file, so the agent reads it at module load. Read inside `predict`, it was
+  already gone.
+
 ## Known limitations
 
-- Registering monitoring scorers needs a PAT with the **all-APIs** scope. Scoped tokens get
-  `403 ... required scopes: all-apis` from the scorer registry.
+- The scorer registry needs a PAT with the **all-APIs** scope. Tokens with individual scopes get
+  `403 ... required scopes: all-apis`.
 - Genie's throughput limit makes evaluation slow by design (2 workers, backoff on 429).
-- Model Serving availability on Free Edition varies. `fd agent deploy --register-only` logs and
-  registers the model without an endpoint, and monitoring works on traces from `fd agent ask` too.
+- The relevance judge marks a correct refusal of an out-of-scope question as irrelevant.

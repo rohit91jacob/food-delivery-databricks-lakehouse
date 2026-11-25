@@ -32,3 +32,4 @@ airflow/plugins/
 airflow/config/
 airflow-webserver.pid
 standalone_admin_password.txt
+mlruns/
