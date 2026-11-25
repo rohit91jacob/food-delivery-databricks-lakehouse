@@ -150,22 +150,45 @@ def log_and_register(w, target: LakehouseTarget, space_id: str, warehouse_id: st
         *(DatabricksTable(table_name=f"{target.catalog}.{target.gold_schema}.{t}") for t in GOLD_TABLES),
     ]
     example = {"input": [{"role": "user", "content": "What was GMV by city on the latest business date?"}]}
-    with mlflow.start_run(run_name="genie-agent-log"):
-        info = mlflow.pyfunc.log_model(
-            name="genie_agent",
-            python_model=str(AGENT_FILE),
-            model_config={"FD_GENIE_SPACE_ID": space_id},
-            resources=resources,
-            input_example=example,
-            pip_requirements=[f"mlflow=={mlflow.__version__}", "databricks-sdk==0.148.0"],
-            registered_model_name=model_name,
-        )
-    return {
-        "experiment_id": exp_id,
-        "model_uri": info.model_uri,
-        "registered_model": model_name,
-        "version": info.registered_model_version,
+    kwargs = {
+        "python_model": str(AGENT_FILE),
+        "model_config": {"FD_GENIE_SPACE_ID": space_id},
+        "resources": resources,
+        "input_example": example,
+        "pip_requirements": [f"mlflow=={mlflow.__version__}", "databricks-sdk==0.148.0"],
     }
+    with mlflow.start_run(run_name="genie-agent-log") as run:
+        if os.name != "nt":
+            info = mlflow.pyfunc.log_model(name="genie_agent", registered_model_name=model_name, **kwargs)
+            model_uri, version = info.model_uri, info.registered_model_version
+        else:
+            model_uri, version = _log_from_windows(mlflow, run.info.run_id, model_name, kwargs)
+    return {"experiment_id": exp_id, "model_uri": model_uri, "registered_model": model_name, "version": version}
+
+
+def _log_from_windows(mlflow, run_id: str, model_name: str, kwargs: dict) -> tuple[str, str]:
+    """Work around an MLflow models-from-code bug for models logged on Windows.
+
+    MLmodel records ``model_code_path`` as the absolute ``C:\\...`` path. The Linux serving
+    container rebuilds it with ``os.path.join(model_dir, os.path.basename(path))``, and POSIX
+    ``basename`` doesn't split on backslashes, so it looks for ``/model/C:\\...`` and the endpoint
+    fails with "An error occurred in model loading code". The file itself is bundled as
+    ``genie_agent.py``, so saving locally and recording the bare filename fixes it.
+    """
+    import tempfile
+
+    import yaml
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "genie_agent"
+        mlflow.pyfunc.save_model(path=str(path), **kwargs)
+        mlmodel = path / "MLmodel"
+        meta = yaml.safe_load(mlmodel.read_text(encoding="utf-8"))
+        meta["flavors"]["python_function"]["model_code_path"] = AGENT_FILE.name
+        mlmodel.write_text(yaml.safe_dump(meta, sort_keys=False), encoding="utf-8")
+        mlflow.log_artifacts(str(path), artifact_path="genie_agent")
+    mv = mlflow.register_model(f"runs:/{run_id}/genie_agent", model_name)
+    return f"models:/{model_name}/{mv.version}", str(mv.version)
 
 
 def deploy(w, target: LakehouseTarget, space_id: str, warehouse_id: str) -> dict:
@@ -173,5 +196,12 @@ def deploy(w, target: LakehouseTarget, space_id: str, warehouse_id: str) -> dict
     from databricks import agents
 
     reg = log_and_register(w, target, space_id, warehouse_id)
-    dep = agents.deploy(reg["registered_model"], reg["version"], scale_to_zero=True, tags={"project": "fooddelivery"})
+    dep = agents.deploy(
+        reg["registered_model"],
+        reg["version"],
+        scale_to_zero=True,
+        tags={"project": "fooddelivery"},
+        # belt and braces: the logged model_config also carries it
+        environment_vars={"FD_GENIE_SPACE_ID": space_id},
+    )
     return {**reg, "endpoint": dep.endpoint_name, "query_endpoint": getattr(dep, "query_endpoint", None)}

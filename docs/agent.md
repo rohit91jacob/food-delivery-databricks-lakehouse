@@ -97,12 +97,22 @@ the manifest) received all six assessments within minutes, without any manual st
 `genie_answered` True, `sql_generated` True, `genie_latency_s` 14.85, `safety` yes,
 `relevance_to_query` yes, `answer_guidelines` yes.
 
-### Deployment
+### Deployment (verified)
 
-`fd agent deploy` registered `workspace.dev_rohit91jacob_fooddelivery_ops.genie_agent` and created
-the Agent Framework endpoint `agents_workspace-dev_rohit91jacob_fooddelivery_ops-genie_agent`
-(scale to zero), along with a Review App for human feedback. The endpoint needs workspace
-authentication; anonymous requests are rejected.
+`fd agent deploy` registered `workspace.dev_rohit91jacob_fooddelivery_ops.genie_agent` (v4) and
+served it as the Agent Framework endpoint `agents_workspace-dev_rohit91jacob_fooddelivery_ops-genie_agent`
+(scale to zero), with a Review App for human feedback. The endpoint reached READY and answered "How
+many orders were placed across all cities on 2026-09-08?" with 3,055, which matches the manifest.
+Anonymous requests get 401.
+
+Two traps found on the way, both handled in code:
+- **Models-from-code logged on Windows don't load on Linux serving.** MLmodel records the absolute
+  `C:\...` path, and the container's POSIX `basename` can't split it. On Windows,
+  `ops._log_from_windows` saves the model, rewrites `model_code_path` to `genie_agent.py`, then
+  logs and registers it.
+- **`ModelConfig` must be read at import time.** MLflow exposes the logged config only while it
+  imports the model file, so the agent reads it at module load. Read inside `predict`, it was
+  already gone.
 
 ## Known limitations
 

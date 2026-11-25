@@ -32,14 +32,24 @@ DEFAULT_MAX_ROWS = 20
 GENIE_TIMEOUT = timedelta(minutes=5)
 
 
-def _config(key: str, default: str | None = None) -> str | None:
-    value = os.environ.get(key)
-    if value:
-        return value
-    try:  # set when the model was logged with model_config=...
-        return mlflow.models.ModelConfig(development_config={}).get(key)
+def _logged_config() -> dict:
+    """The ``model_config`` the model was logged with.
+
+    MLflow exposes it to ``ModelConfig`` only while it imports this file, so it must be read at
+    import time; read lazily inside ``predict`` it is already gone and the agent would fall back to
+    an unset environment variable.
+    """
+    try:
+        return dict(mlflow.models.ModelConfig(development_config={}).to_dict() or {})
     except Exception:
-        return default
+        return {}
+
+
+_LOGGED_CONFIG = _logged_config()
+
+
+def _config(key: str, default: str | None = None) -> str | None:
+    return os.environ.get(key) or _LOGGED_CONFIG.get(key) or default
 
 
 def _text(content: Any) -> str:
