@@ -46,9 +46,43 @@ flowchart LR
     GM --> D[AI/BI dashboard]
     GM --> DQ[data_quality task<br/>fd-dq -> dq_results]
   end
+  subgraph Agent["Genie agent + MLflow (fd agent / Agent Framework)"]
+    EP[Serving endpoint<br/>+ Review App] --> GA[GenieAgent<br/>MLflow ResponsesAgent]
+    GA -- "genie.ask" --> GS[Genie space<br/>12 gold tables, instructions,<br/>example SQL]
+    EV[eval set<br/>generator ground truth] --> GA
+    GA -. "trace: AGENT + 2 TOOL spans" .-> EXP[(MLflow experiment<br/>traces, eval runs)]
+    MON[registered scorers<br/>production monitoring] -- "assess sampled traces" --> EXP
+  end
   U -. "/Volumes/.../landing" .-> V
   J -. "run_now(job_name, run_date)" .-> B
   R -. "raise_error on mismatch" .-> GM
+  GS -. "generated SQL on the SQL warehouse" .-> GM
+  G -. "manifests" .-> EV
+```
+
+How one question flows through the agent, and how monitoring scores it afterwards:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor U as User / Review App / fd agent ask
+  participant EP as Serving endpoint
+  participant A as GenieAgent (predict = AGENT span)
+  participant G as Genie Conversation API
+  participant W as SQL warehouse (gold_*)
+  participant X as MLflow experiment
+  participant S as Registered scorers
+  U->>EP: Responses API request (+ conversation_id for follow-ups)
+  EP->>A: predict(request)
+  A->>G: start_conversation / create_message (genie.ask TOOL span, backoff on 429)
+  G->>W: generated SQL
+  W-->>G: rows
+  G-->>A: text + SQL attachment
+  A->>G: get_message_attachment_query_result (genie.query_result TOOL span)
+  G-->>A: columns + rows
+  A-->>U: answer text, result table, SQL + custom_outputs (status, sql, row_count)
+  A-)X: trace (session = Genie conversation, tags genie.status + genie.space_id)
+  S-)X: async assessments (answered, SQL, latency, safety on 100%, relevance + guidelines on 50%)
 ```
 
 | Component | Where | What it does |
@@ -63,6 +97,10 @@ flowchart LR
 | Scheduled refresh | `.github/workflows/refresh.yml`, `src/fooddelivery/refresh.py` | Nightly hosted run: credential check → next date → generate → upload → job → reconcile, opening an issue on failure |
 | Orchestration (self-hosted) | `airflow/` | DAG, image, docker-compose (LocalExecutor) |
 | Offline emulator | `src/fooddelivery/local/` | Runs the **unchanged** pipeline files on local Spark with shims ([ADR 0004](docs/adr/0004-local-pipeline-emulator.md)) |
+| Genie space | `src/fooddelivery/agent/space.py` | The space over the 12 gold tables, declared in code: one instruction, example SQL, sample questions. uuid5 IDs satisfy the API's sorting rules, and `fd agent space` updates the same space on re-runs |
+| Genie agent | `src/fooddelivery/agent/genie_agent.py` | MLflow `ResponsesAgent` around the Genie Conversation API. Traced (`predict` → `genie.ask` → `genie.query_result`), session = Genie conversation, backs off on 429. Self-contained, so it is logged as models-from-code |
+| Agent evaluation | `src/fooddelivery/agent/evalset.py`, `scorers.py` | 26 questions whose answers come from the **generator manifest**; `mlflow.genai.evaluate` with an exact `numeric_match` plus LLM judges ([docs/agent.md](docs/agent.md)) |
+| Monitoring and serving | `src/fooddelivery/agent/ops.py` | `fd agent monitor` registers and starts 6 production scorers; `fd agent deploy` logs to UC (`<schema>_ops.genie_agent`) and serves an Agent Framework endpoint with a Review App ([ADR 0008](docs/adr/0008-genie-agent-mlflow.md)) |
 
 ## Tech stack (pinned)
 
@@ -76,6 +114,7 @@ flowchart LR
 | databricks-sdk | 0.148.0 |
 | kaggle | 2.2.4 (`KGAT_` access tokens) |
 | Local Spark / Delta (tests, emulator) | pyspark 4.0.1 / delta-spark 4.0.1 (Java 17+) |
+| Genie agent (`agent` group) | MLflow 3.18.0 (`mlflow[databricks]`: tracing, `genai.evaluate`, registered scorers), databricks-agents 1.13.0 (`agents.deploy`), Genie Conversation API via databricks-sdk 0.148.0 |
 | Tooling | uv (lockfile `uv.lock`), ruff 0.16.10, pytest 9.1.1 |
 
 ## Data sources
@@ -241,7 +280,8 @@ Step-by-step setup and renewal: **[docs/databricks_auth.md](docs/databricks_auth
 
 ```bash
 uv run ruff check . && uv run ruff format --check .
-uv run pytest -m "not spark and not airflow"     # 49 tests: generator, seed, config, uploader, SQL, bundle schema, refresh/auth logic
+uv run pytest -m "not spark and not airflow"     # 66 tests: generator, seed, config, uploader, SQL, bundle schema, refresh/auth logic, Genie agent
+uv run --group agent pytest tests/unit/test_agent.py tests/unit/test_agent_mlflow.py   # 17 tests: space rules, eval set, scorers, traced agent vs a fake Genie
 uv run pytest -m spark                            # 10 tests: SCD semantics + pipeline end-to-end (emulator + DQ)
 AIRFLOW__CORE__LOAD_EXAMPLES=false uv run pytest -m airflow   # 3 tests: DAG integrity
 ```
@@ -254,6 +294,7 @@ All of these ran locally (WSL, Java 21).
 | `ci.yml` / unit | Unit tests, plus every bundle YAML validated against `databricks bundle schema` from the pinned CLI |
 | `ci.yml` / spark | Java 17: SCD1/SCD2 semantics; the real pipeline sources emulated end to end; every error-severity DQ check per day; exact dedupe/quarantine counts; SCD2 point-in-time pricing; the Airflow reconciliation SQL passing, then catching a 1-paisa tamper; idempotent rerun |
 | `ci.yml` / airflow | DagBag import, task graph, retries, `depends_on_past`, deferrable trigger |
+| `ci.yml` / agent | Genie agent offline: serialized-space API rules, eval-set determinism, scorers, and the traced agent (spans, follow-ups, failures) against a fake Genie with a local MLflow store |
 | `ci.yml` / compose | `docker compose config`, image build, `up --wait` (all services healthy), DAG registered without import errors |
 | `deploy.yml` | `bundle validate` + `deploy` (dev on PRs, prod on `main`). Skipped cleanly until a host and credential are configured |
 | `refresh.yml` | Nightly (01:00 UTC) and manual: credential health → next business date → generate → upload → job → reconciliation, with an issue on failure |
@@ -322,12 +363,13 @@ Details: [ADR 0007](docs/adr/0007-unattended-auth.md).
 │   │   ├── landing/uploader.py    # Files API sync
 │   │   ├── local/                 # pipeline emulator + local AUTO CDC (SCD1/SCD2)
 │   │   ├── refresh.py             # scheduled refresh: auth selection, credential health, job + SQL helpers
+│   │   ├── agent/                 # Genie space, MLflow ResponsesAgent, eval set, scorers, monitor/deploy ops
 │   │   ├── seeding.py, config.py, logs.py, cli.py
 │   └── fooddelivery_pipeline/transformations/   # bronze_ingest.py, silver_conform.py, gold_marts.py
 ├── airflow/                       # dags/, Dockerfile, docker-compose.yaml, .env.example
 ├── tests/                         # unit/, spark/, airflow/
 ├── seed/                          # committed CC0 restaurant seed + checksum + attribution
-├── docs/                          # databricks_auth.md, data_dictionary.md, metrics.md, runbook.md, adr/
+├── docs/                          # agent.md, databricks_auth.md, data_dictionary.md, metrics.md, runbook.md, adr/
 ├── scripts/                       # bundle_env.py, gh_issue.sh
 ├── .github/                       # workflows/{ci,deploy,refresh,keepalive}.yml, dependabot.yml
 ├── Makefile, pyproject.toml, uv.lock, .env.example, .pre-commit-config.yaml
@@ -355,6 +397,7 @@ has to **run unattended** on free GitHub-hosted runners, with nobody there to re
 | **Emulator instead of mocks** ([ADR 0004](docs/adr/0004-local-pipeline-emulator.md)) | `PipelineEmulator` (`src/fooddelivery/local/lakehouse.py`) runs the unchanged pipeline files on local Spark with shims for `pyspark.pipelines` and `spark`, and `src/fooddelivery/local/scd.py` applies AUTO CDC. CI runs generator → pipeline → DQ catalog end to end, without credentials | Mocking `dp` (proves wiring, not results); testing in the workspace on every push (CI holds no secrets, and it spends quota) | Streaming state, checkpoints and incremental MV refresh are covered only by a real deploy; where Free Edition behaves differently is listed under [Live verification](#live-verification-databricks-free-edition) |
 | **Hosted nightly refresh on GitHub Actions, Airflow as the self-hosted twin, one date at a time** | `refresh.yml` runs the DAG's steps through the `fd` CLI (`src/fooddelivery/refresh.py`). The next date is the newest in gold plus one, so an unfinished date is simply retried. A workflow concurrency group, the job's `max_concurrent_runs: 1` queue and the DAG's `max_active_runs=1` stop runs overlapping, as Free Edition allows one active pipeline update | An always-on Airflow host; the bundle job's own schedule (it ships paused, and the job does not generate data); file-arrival triggers (paid tiers) | Backfills run date by date. Scheduled workflows need `keepalive.yml` to survive GitHub's 60-day inactivity rule, and only one orchestrator may target a deployment |
 | **Unattended auth: a least-privilege service principal** ([ADR 0007](docs/adr/0007-unattended-auth.md)) | GitHub OIDC federation needs account-level APIs, which Free Edition lacks, so the refresh is built to run as a dedicated service principal (OAuth M2M), allowed only to run the job, write the landing volume, read gold and use the warehouse. The workflows export exactly one credential, and a `credential health` job fails within 14 days of expiry, opening a dated issue instead of letting the feed go stale | A user PAT (the fallback until the principal exists, with that user's rights); OIDC federation (the workflow supports it, the edition does not) | The OAuth secret lasts at most 730 days and its expiry can't be read without account APIs, so it is recorded by hand (`DATABRICKS_CLIENT_SECRET_EXPIRES`) and renewed every two years. Deploys stay on a long-lived PAT unless `FD_DEPLOY_AUTH=service-principal` is set |
+| **A Genie agent graded against the generator, monitored with MLflow** ([ADR 0008](docs/adr/0008-genie-agent-mlflow.md)) | Genie turns questions into SQL over gold. A thin MLflow `ResponsesAgent` makes each answer a trace (prompt, SQL, rows, status). Because the simulator knows the exact answer to every KPI question, the eval set's answer key doesn't come from the system under test; `numeric_match` requires counts to match exactly and money to the paisa. In production, code checks score every trace and LLM judges score a sample | Genie used directly in the UI (no traces, no accuracy number); a hand-written LLM text-to-SQL chain (more code, and it duplicates Genie); an eval set labelled from gold (it would grade gold against itself) | Genie's per-workspace throughput limit keeps evaluation slow (2 workers, backoff on 429). The scorer registry needs an all-APIs PAT. LLM judges cost tokens and can disagree with a correct refusal |
 
 ### Stack choices
 
@@ -370,7 +413,8 @@ has to **run unattended** on free GitHub-hosted runners, with nobody there to re
 | Self-hosted orchestration | Apache Airflow 3.3.2 + `apache-airflow-providers-databricks` 7.20.0 (as pinned by the official constraints); docker compose with LocalExecutor and Postgres 16, or `airflow standalone` | IST data intervals with `catchup`, `depends_on_past` and `airflow backfill create`; the deferrable `DatabricksRunNowOperator` waits on the triggerer without holding a worker slot; `DatabricksSqlOperator` runs the reconciliation | CeleryExecutor with Redis is a worker fleet for one daily DAG; scheduling the bundle job alone would mean generating data inside the workspace and giving up the independent manifest |
 | Hosted scheduling and CI | GitHub Actions: `ci.yml`, `deploy.yml`, `refresh.yml`, `keepalive.yml` | Free hosted runners for a public repository and nothing to operate; failures open or update one issue with only `GITHUB_TOKEN`; deploys skip cleanly until a host and credential exist | An always-on Airflow server is a machine to pay for and patch; cron on a laptop stops when it sleeps |
 | Local Spark | pyspark 4.0.1 + delta-spark 4.0.1, Java 17+ (`spark` group) | ANSI mode is on, as on serverless, which the `try_*` parsing in silver relies on; Delta backs `fd local-run --persist`; the CI `spark` job runs the emulator on it | Databricks Connect needs a workspace and credentials, which CI does not have; mocking Spark would prove nothing about the transformations |
-| Serving | AI/BI dashboard (`dashboards/food_delivery_ops.lvdash.json`) on the Serverless Starter Warehouse (2X-Small) | Included in Free Edition and deployed with the bundle; a unit test checks that it reads only tables the gold pipeline defines | An external BI tool adds a licence, a connection and another credential; Unity Catalog metric views and Genie are on the [Roadmap](#roadmap) |
+| Serving | AI/BI dashboard (`dashboards/food_delivery_ops.lvdash.json`) on the Serverless Starter Warehouse (2X-Small) | Included in Free Edition and deployed with the bundle; a unit test checks that it reads only tables the gold pipeline defines | An external BI tool adds a licence, a connection and another credential; Unity Catalog metric views are on the [Roadmap](#roadmap) |
+| Natural-language access and LLMOps | Genie space + MLflow 3.18 `ResponsesAgent`, `mlflow.genai.evaluate`, registered scorers; Agent Framework endpoint (scale to zero) | Genie is included in Free Edition and grounds answers in SQL over Unity Catalog. MLflow is the workspace-native place for traces, evaluation runs and monitoring, so there is no extra service or credential. The Responses API interface works unchanged in the Review App, on the endpoint and in `genai.evaluate` | A LangChain/LangGraph SQL agent would rebuild text-to-SQL that Genie already provides; an external observability tool (LangSmith, Arize) adds an account and sends data outside the workspace |
 | Seed data | Committed CC0 seed (8,673 restaurants, SHA-256-checked); `kaggle` 2.2.4 only to rebuild it | CC0 allows redistributing the normalised seed, so CI, scheduled runs and new clones need no Kaggle account ([ADR 0006](docs/adr/0006-kaggle-seed.md)) | Downloading on every run needs a Kaggle token on every runner; the other candidate datasets are licensed "other" or "copyright-authors" |
 | Tooling | uv (`uv.lock`, `--locked` in CI), ruff 0.16.10, pytest 9.1.1, pre-commit, Dependabot | One lockfile with `dev`/`spark`/`airflow` groups keeps the heavy stacks optional, and pytest markers let the unit suite run without Java or Airflow | pip with requirements files gives no single lock across groups; Poetry or pip-tools would work, but uv also builds the bundle's wheel and caches in CI |
 
@@ -423,6 +467,18 @@ A DAG run takes about 16 minutes, about 9 of which are the serverless pipeline u
 4. A failed pipeline update is retried automatically several times inside one job run, which consumes quota.
    Fix the root cause before re-triggering.
 
+**Genie agent (dev target, 25 Nov 2026)**, details in [docs/agent.md](docs/agent.md):
+
+| Check | Result |
+|---|---|
+| `fd agent eval --start 2026-09-01 --end 2026-09-17` (26 questions) | `numeric_match` **1.00** on the 25 with ground truth; correctness 1.00, safety 1.00; latency mean 13.5 s, p90 15.1 s. The 26th, out-of-scope question was correctly declined |
+| Production monitoring | 6 scorers registered and started; a live question received all 6 assessments without any manual step |
+| Endpoint `agents_..._ops-genie_agent` (v4) | READY; answered 3,055 orders for 2026-09-08, which matches the manifest; anonymous calls get 401 |
+
+Two traps found during deployment, both handled in code: models-from-code logged on **Windows** record a `C:\...`
+`model_code_path` that the Linux serving container can't resolve, and `ModelConfig` must be read when the model
+file is imported, not inside `predict`.
+
 ## Known limitations
 
 - Only the **dev** target has run live. The prod target deploys from CI on `main`, but its DAG has not been run.
@@ -432,6 +488,8 @@ A DAG run takes about 16 minutes, about 9 of which are the serverless pipeline u
   speeds) are documented constants, not fitted.
 - `FD_START_DATE` must be generated first: day 0 carries the full dimension snapshot, and later dates carry CDC
   changes only.
+- The Genie agent has run against **dev** gold only. Monitoring scorers need a PAT with the all-APIs scope, and
+  Genie's throughput limit makes evaluation take minutes.
 
 ## Roadmap
 
@@ -439,7 +497,8 @@ A DAG run takes about 16 minutes, about 9 of which are the serverless pipeline u
 - GitHub OIDC token federation (no stored secret) on an edition with account-level APIs.
 - File-arrival trigger on the volume instead of Airflow-triggered runs (paid tiers).
 - Streaming file drops (intraday micro-batches) for near-real-time SLA tiles.
-- Unity Catalog metric views / Genie space over `gold_*`.
+- Unity Catalog metric views over `gold_*`, added to the Genie space as trusted measures.
+- Run `fd agent eval` after each nightly refresh and alert when `numeric_match` drops.
 - Lakehouse monitoring on `gold_daily_kpis` for drift alerts.
 
 ## License
