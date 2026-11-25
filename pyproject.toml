@@ -33,6 +33,12 @@ spark = [
     "pyspark==4.0.1",
     "delta-spark==4.0.1",
 ]
+# Genie agent + MLflow tracing / evaluation / monitoring (fd agent ...)
+agent = [
+    "mlflow[databricks]==3.18.0",
+    "databricks-agents==1.13.0",
+    "databricks-sdk==0.148.0",
+]
 airflow = [
     "apache-airflow==3.3.2",
     "apache-airflow-providers-databricks==7.20.0",
@@ -74,6 +80,7 @@ markers = [
     "spark: needs a local Spark + Delta session (dependency group `spark`)",
     "airflow: needs Apache Airflow installed (dependency group `airflow`)",
     "slow: end-to-end tests that generate several days of data",
+    "agent: needs MLflow (dependency group `agent`)",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning:pyspark.*",

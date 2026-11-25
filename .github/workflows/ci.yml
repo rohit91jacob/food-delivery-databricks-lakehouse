@@ -80,6 +80,19 @@ jobs:
           AIRFLOW__CORE__LOAD_EXAMPLES: "false"
           AIRFLOW_HOME: ${{ runner.temp }}/airflow
 
+  agent:
+    name: Genie agent + MLflow (offline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked --group dev --group agent
+      - run: uv run pytest tests/unit/test_agent.py tests/unit/test_agent_mlflow.py -v
+        env:
+          MLFLOW_DISABLE_AGENT_HINT: "1"
+
   compose:
     name: docker compose smoke test
     runs-on: ubuntu-latest

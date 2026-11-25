@@ -148,6 +148,74 @@ def cmd_reconcile(args) -> dict:
     return {"business_date": args.date.isoformat(), "result": rows[0][0] if rows else None}
 
 
+def _agent_context(args):
+    import os
+
+    from fooddelivery.landing.uploader import workspace_client
+    from fooddelivery.refresh import warehouse_id
+
+    profile = getattr(args, "profile", None)
+    if profile:
+        # MLflow's "databricks" tracking URI and the agent's own WorkspaceClient both read this.
+        os.environ["DATABRICKS_CONFIG_PROFILE"] = profile
+    target = LakehouseTarget.from_env()
+    w = workspace_client(profile=profile)
+    return w, target, warehouse_id(w, target.warehouse_name)
+
+
+def _space_id(args) -> str:
+    import os
+
+    sid = getattr(args, "space_id", None) or os.environ.get("FD_GENIE_SPACE_ID")
+    if not sid:
+        raise SystemExit("set FD_GENIE_SPACE_ID (printed by `fd agent space`) or pass --space-id")
+    os.environ["FD_GENIE_SPACE_ID"] = sid
+    return sid
+
+
+def cmd_agent_space(args) -> dict:
+    from fooddelivery.agent.space import build_serialized_space, ensure_space
+
+    if args.dry_run:
+        return build_serialized_space(LakehouseTarget.from_env())
+    w, target, wh = _agent_context(args)
+    out = ensure_space(w, target, wh)
+    return {**out, "url": f"{w.config.host.rstrip('/')}/genie/rooms/{out['space_id']}", "warehouse_id": wh}
+
+
+def cmd_agent_ask(args) -> dict:
+    from fooddelivery.agent import ops
+
+    _space_id(args)
+    w, _, _ = _agent_context(args)
+    return ops.ask(w, args.question, args.conversation_id)
+
+
+def cmd_agent_eval(args) -> dict:
+    from fooddelivery.agent import ops
+
+    _space_id(args)
+    w, _, _ = _agent_context(args)
+    return ops.evaluate(w, args.start, args.end, per_metric=args.per_metric)
+
+
+def cmd_agent_monitor(args) -> dict:
+    from fooddelivery.agent import ops
+
+    w, _, _ = _agent_context(args)
+    return ops.stop_monitoring(w) if args.stop else ops.start_monitoring(w, sample_scale=args.sample_scale)
+
+
+def cmd_agent_deploy(args) -> dict:
+    from fooddelivery.agent import ops
+
+    sid = _space_id(args)
+    w, target, wh = _agent_context(args)
+    if args.register_only:
+        return ops.log_and_register(w, target, sid, wh)
+    return ops.deploy(w, target, sid, wh)
+
+
 def main(argv: list[str] | None = None) -> int:
     logs.configure()
     p = argparse.ArgumentParser(prog="fd", description="Food-delivery lakehouse operator CLI")
@@ -195,6 +263,33 @@ def main(argv: list[str] | None = None) -> int:
     k = sub.add_parser("reconcile", help="reconcile gold with the local manifest on the SQL warehouse")
     k.add_argument("--date", type=date.fromisoformat, required=True)
     k.set_defaults(func=cmd_reconcile)
+
+    a = sub.add_parser("agent", help="Genie agent: space, ask, eval, monitor, deploy (MLflow traced)")
+    asub = a.add_subparsers(dest="agent_command", required=True)
+
+    def _agent_parser(name: str, func, help_: str):
+        x = asub.add_parser(name, help=help_)
+        x.add_argument("--profile", default=None, help="~/.databrickscfg profile (default: unified auth)")
+        x.set_defaults(func=func)
+        return x
+
+    x = _agent_parser("space", cmd_agent_space, "create or update the Genie space over the gold marts")
+    x.add_argument("--dry-run", action="store_true", help="print the serialized space, call nothing")
+    x = _agent_parser("ask", cmd_agent_ask, "ask the agent one question (traced to the MLflow experiment)")
+    x.add_argument("question")
+    x.add_argument("--conversation-id", default=None, help="continue a Genie conversation")
+    x.add_argument("--space-id", default=None)
+    x = _agent_parser("eval", cmd_agent_eval, "evaluate against generator ground truth (mlflow.genai.evaluate)")
+    x.add_argument("--start", type=date.fromisoformat, required=True, help="first business date in gold")
+    x.add_argument("--end", type=date.fromisoformat, required=True, help="last business date in gold")
+    x.add_argument("--per-metric", type=int, default=3, help="questions per metric template")
+    x.add_argument("--space-id", default=None)
+    x = _agent_parser("monitor", cmd_agent_monitor, "register + start (or --stop) production monitoring scorers")
+    x.add_argument("--sample-scale", type=float, default=1.0, help="multiply every scorer's sample rate")
+    x.add_argument("--stop", action="store_true")
+    x = _agent_parser("deploy", cmd_agent_deploy, "log to Unity Catalog and serve with Agent Framework")
+    x.add_argument("--register-only", action="store_true", help="log + register, skip the serving endpoint")
+    x.add_argument("--space-id", default=None)
 
     args = p.parse_args(argv)
     try:
