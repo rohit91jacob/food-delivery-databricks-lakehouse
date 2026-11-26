@@ -14,8 +14,8 @@ requires-python = ">=3.12,<3.13"
 dependencies = []
 
 [project.optional-dependencies]
-seed = ["kaggle>=2.2,<3"]
-databricks = ["databricks-sdk>=0.60,<1"]
+seed = ["kaggle<3,>=2.2"]
+databricks = ["databricks-sdk==0.170.0"]
 
 [project.scripts]
 fd = "fooddelivery.cli:main"
@@ -23,27 +23,27 @@ fd-dq = "fooddelivery.quality.runner:main"
 
 [dependency-groups]
 dev = [
-    "pytest==9.1.1",
-    "ruff==0.16.10",
-    "pyyaml==6.0.3",
+    "pytest==9.2.0",
+    "ruff==0.17.6",
+    "pyyaml==6.0.4",
     "jsonschema==4.26.0",
-    "regex==2026.9.29",
+    "regex==2026.11.19",
 ]
 spark = [
-    "pyspark==4.0.1",
+    "pyspark==4.2.1",
     "delta-spark==4.0.1",
 ]
 # Genie agent + MLflow tracing / evaluation / monitoring (fd agent ...)
 agent = [
     "mlflow[databricks]==3.18.0",
     "databricks-agents==1.13.0",
-    "databricks-sdk==0.148.0",
+    "databricks-sdk==0.170.0",
 ]
 airflow = [
-    "apache-airflow==3.3.2",
-    "apache-airflow-providers-databricks==7.20.0",
-    "kaggle==2.2.4",
-    "databricks-sdk==0.148.0",
+    "apache-airflow==3.4.0",
+    "apache-airflow-providers-databricks==7.25.0",
+    "kaggle==2.2.5",
+    "databricks-sdk==0.170.0",
 ]
 
 [build-system]
